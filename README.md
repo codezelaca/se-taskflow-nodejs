@@ -1,0 +1,358 @@
+# Taskflow
+
+Taskflow is a real-time, collaborative task queue system built to teach backend engineering from first principles.
+
+This repository intentionally avoids backend frameworks so learners can understand exactly what happens under the hood in production systems. Routing, request parsing, state management, and API behavior are implemented manually using core Node.js APIs.
+
+## Why This Repository Exists
+
+Most tutorials start with frameworks and hide core mechanics. Taskflow does the opposite:
+
+- Build with core Node.js first.
+- Understand architecture and tradeoffs before abstractions.
+- Learn data structures and algorithmic complexity in context.
+- Introduce advanced capabilities (streaming, worker threads, WebSockets) progressively.
+
+The result is a learning-first codebase that teaches both implementation and reasoning.
+
+## Current Implementation Status
+
+The code currently includes Part 1 and Part 2 foundations:
+
+- [x] Raw Node.js HTTP server with manual routing
+- [x] Full CRUD endpoints for tasks
+- [x] Manual JSON body parsing from request stream
+- [x] In-memory task store using JavaScript Map (Hash Map)
+- [x] Singleton data-store pattern through Node module caching
+- [x] Big O benchmark script comparing Array search vs Map lookup
+
+Planned parts are documented in the roadmap below and expanded in the learner guides.
+
+## Technology Constraints
+
+- Runtime: Node.js
+- Current external npm packages: none
+- Planned single exception: ws (introduced in final WebSocket step)
+
+Everything else is built with built-in Node.js modules.
+
+## Repository Structure
+
+- [server.js](server.js): HTTP server, route handling, JSON parsing, response handling
+- [benchmarks.js](benchmarks.js): Big O demonstration (Array.find vs Map.get)
+- [src/store/TaskStore.js](src/store/TaskStore.js): In-memory task storage class and singleton export
+- [learner/README.md](learner/README.md): Learning path and deep-dive documentation index
+
+## Quick Start
+
+## 1) Prerequisites
+
+- Node.js 18+ recommended (crypto.randomUUID support)
+
+## 2) Start the API Server
+
+```bash
+node server.js
+```
+
+Expected startup output:
+
+- TaskFlow server is running on http://localhost:3000
+- Listening for requests... (Press Ctrl+C to stop)
+
+## 3) Run the Complexity Benchmark
+
+```bash
+node benchmarks.js
+```
+
+You should observe significantly faster Map lookup timing compared to Array.find for large collections.
+
+## API Reference (Current)
+
+Base URL: http://localhost:3000
+
+### GET /tasks
+
+Returns all tasks.
+
+Response 200 example:
+
+```json
+[
+  {
+    "id": "5e9d2f1f-76f4-4f76-a6a6-2fba2dd22657",
+    "title": "Write README",
+    "description": "Document project",
+    "status": "pending",
+    "createdAt": "2026-03-26T07:00:00.000Z",
+    "updatedAt": "2026-03-26T07:00:00.000Z"
+  }
+]
+```
+
+### GET /tasks/:id
+
+Returns a single task by ID.
+
+Success:
+
+- 200 with task object
+
+Failure:
+
+- 404 with:
+
+```json
+{ "error": "Task not found" }
+```
+
+### POST /tasks
+
+Creates a new task.
+
+Request body (all fields optional in current implementation):
+
+```json
+{
+  "title": "Prepare sprint board",
+  "description": "Create tasks for release",
+  "status": "pending"
+}
+```
+
+Defaults applied by store:
+
+- title: Untitled Task
+- description: empty string
+- status: pending
+
+Response:
+
+- 201 with created task
+- 400 with:
+
+```json
+{ "error": "Invalid JSON payload format." }
+```
+
+### PUT /tasks/:id
+
+Updates an existing task by merging provided fields.
+
+Request body example:
+
+```json
+{
+  "status": "in-progress",
+  "title": "Prepare release board"
+}
+```
+
+Behavior:
+
+- Existing task fields are merged with request fields.
+- id cannot be overwritten.
+- updatedAt is always refreshed.
+
+Responses:
+
+- 200 with updated task
+- 404 with:
+
+```json
+{ "error": "Task not found, update failed." }
+```
+
+- 400 with:
+
+```json
+{ "error": "Invalid JSON payload format." }
+```
+
+### DELETE /tasks/:id
+
+Deletes a task.
+
+Responses:
+
+- 204 on success (no response body)
+- 404 with:
+
+```json
+{ "error": "Task not found, deletion failed." }
+```
+
+### Error Responses for Unsupported Routes/Methods
+
+- Unknown route: 404 { "error": "Route Not Found" }
+- Unsupported method on /tasks routes: 405 { "error": "Method Not Allowed on this endpoint." }
+
+## End-to-End API Walkthrough (Copy/Paste)
+
+### Create a Task
+
+```bash
+curl -i -X POST http://localhost:3000/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Implement auth middleware","description":"Part 5 prep","status":"pending"}'
+```
+
+### List Tasks
+
+```bash
+curl -i http://localhost:3000/tasks
+```
+
+### Read One Task
+
+Replace TASK_ID with the id returned by create/list.
+
+```bash
+curl -i http://localhost:3000/tasks/TASK_ID
+```
+
+### Update Task
+
+```bash
+curl -i -X PUT http://localhost:3000/tasks/TASK_ID \
+  -H "Content-Type: application/json" \
+  -d '{"status":"in-progress"}'
+```
+
+### Delete Task
+
+```bash
+curl -i -X DELETE http://localhost:3000/tasks/TASK_ID
+```
+
+## Data Model (Current)
+
+Each task currently contains:
+
+- id: UUID string generated by crypto.randomUUID
+- title: string
+- description: string
+- status: string (pending, in-progress, completed are intended values)
+- createdAt: ISO timestamp string
+- updatedAt: ISO timestamp string
+
+Note: status values are not yet validated by middleware. Validation is part of planned progression.
+
+## Internal Architecture (Current)
+
+### Request Flow
+
+1. Node http server accepts request.
+2. URL/method are parsed manually.
+3. For POST and PUT, request body is read from stream and parsed with JSON.parse.
+4. TaskStore methods are called.
+5. JSON response is sent with explicit status code and content-type.
+
+### Storage Strategy
+
+TaskStore uses a JavaScript Map:
+
+- get/set/delete/has operations are average-case O(1)
+- predictable iteration order for getAll
+- strong fit for ID-based lookup workloads
+
+This aligns with real-world backend behavior where key-based access dominates.
+
+### Singleton Pattern
+
+TaskStore exports one instantiated object. Because Node caches modules after first require call, all imports share one in-memory task state for a process lifetime.
+
+Implication:
+
+- Data persists only while server process is running.
+- Restarting server resets all tasks.
+
+## Learning Roadmap (Project Scope)
+
+Taskflow’s intended progression covers:
+
+1. Raw HTTP API in Node.js without frameworks
+2. In-memory task store with Hash Map and complexity benchmark
+3. Priority queue for prioritized scheduling
+4. Linked-list dependency chains and recursive dependency resolution
+5. Middleware chain (authentication, authorization, validation)
+6. Global error handling and structured logging
+7. Intentional memory leak demonstration and remediation
+8. Worker Thread report generation for CPU-heavy processing
+9. Streaming CSV export via Node streams
+10. WebSocket live updates using ws
+
+This repository currently has steps 1 and 2 implemented and provides learning material for the complete journey.
+
+## Concepts Covered in This Repository
+
+- Event Loop internals (Timers, Poll, Check phases)
+- Call Stack and libuv responsibilities
+- Memory model (stack vs heap) and V8 garbage collection behavior
+- Leak patterns and prevention strategies
+- Concurrency models: async I/O vs Worker Threads
+- Big O notation for practical backend choices
+- Core data structures: Arrays, Linked Lists, Hash Maps, Queues
+- Algorithmic techniques: searching, sorting strategy selection, recursion
+- Middleware as Chain of Responsibility
+- Centralized error handling and logging discipline
+- Streams for low-memory large response generation
+- WebSockets for real-time synchronization
+
+Detailed guides are available in [learner/README.md](learner/README.md).
+
+## Known Limitations (Current Code)
+
+- No persistence layer (in-memory only)
+- No auth/permission middleware yet
+- No schema validation middleware yet
+- No global centralized error pipeline yet
+- No worker threads, streams export, or WebSockets yet
+- No automated tests yet
+
+These are intentional for staged learning.
+
+## Suggested Learning Flow
+
+1. Run server and call each endpoint manually.
+2. Read [src/store/TaskStore.js](src/store/TaskStore.js) and explain each operation’s time complexity.
+3. Run benchmark and discuss why complexity dominates at scale.
+4. Read learner guides in order from [learner/README.md](learner/README.md).
+5. Implement next roadmap step as an exercise.
+
+## Practical Exercises
+
+- Add input validation for title and status without external libraries.
+- Add a simple middleware runner function before route handlers.
+- Add a global error responder that normalizes JSON error output.
+- Extend benchmark script to compare Map vs Object for key lookup.
+- Add pagination query support to GET /tasks.
+
+## Troubleshooting
+
+### Port 3000 already in use
+
+Run server on a free port by changing PORT in [server.js](server.js).
+
+### Invalid JSON errors on POST/PUT
+
+Verify request body is valid JSON and Content-Type is application/json.
+
+### Task not found on update/delete
+
+Ensure the ID exists and was copied from a real create/list response.
+
+### Data disappears after restart
+
+Expected behavior. Store is in memory only.
+
+## No License File Detected
+
+A license file is not currently present in this repository. If this project is intended for public use, add a license to define usage rights.
+
+## Learner Documentation
+
+Start here: [learner/README.md](learner/README.md)
+
+This folder contains clean, focused guides with practical examples designed for self-study, classroom use, and workshop delivery.
