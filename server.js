@@ -4,9 +4,20 @@
 
 const http = require('http');
 
+// Load simple .env parser logic
+require('./src/config/env').loadEnv();
+
 // Import our Singleton TaskStore. 
-// Any updates through the POST endpoint mutate the state stored in this single instance.
 const taskStore = require('./src/store/TaskStore');
+
+// Import Middleware Chain Components
+const AuthHandler = require('./src/middleware/AuthHandler');
+const PermissionHandler = require('./src/middleware/PermissionHandler');
+const ValidationHandler = require('./src/middleware/ValidationHandler');
+
+// Hook up the Chain block: Auth -> Permission -> Validation
+const middlewareChain = new AuthHandler();
+middlewareChain.setNext(new PermissionHandler()).setNext(new ValidationHandler());
 
 const PORT = 3000;
 
@@ -38,8 +49,25 @@ const server = http.createServer(async (req, res) => {
 
     const { method, url } = req;
 
+    // Parse incoming JSON body for mutating requests globally
+    if (method === 'POST' || method === 'PUT') {
+        try {
+            req.body = await parseJSON(req);
+        } catch (error) {
+            return sendResponse(400, { error: 'Invalid JSON payload format.' });
+        }
+    }
+
     // We'll add rudimentary routing based on the start of the URL.
     if (url === '/tasks' || url.startsWith('/tasks/')) {
+        
+        // ==========================================
+        // MIDDLEWARE CHAIN EXECUTION
+        // ==========================================
+        const chainPassed = await middlewareChain.handle(req, res, sendResponse);
+        if (!chainPassed) {
+            return; // A handler caught an issue, returned an HTTP error, and halted execution.
+        }
         
         // Extract an ID if it exists in the URL (e.g., /tasks/fa21-b2c3 -> "fa21-b2c3")
         const id = url.split('/')[2]; 
@@ -71,30 +99,20 @@ const server = http.createServer(async (req, res) => {
         // Handle POST /tasks (Create)
         // ----------------------------------------------------
         else if (method === 'POST') {
-            try {
-                const body = await parseJSON(req);
-                const newTask = taskStore.create(body);
-                sendResponse(201, newTask);
-            } catch (error) {
-                sendResponse(400, { error: 'Invalid JSON payload format.' });
-            }
+            const newTask = taskStore.create(req.body);
+            sendResponse(201, newTask);
         } 
 
         // ----------------------------------------------------
         // Handle PUT /tasks/:id (Update)
         // ----------------------------------------------------
         else if (method === 'PUT' && id) {
-            try {
-                const body = await parseJSON(req);
-                const updatedTask = taskStore.update(id, body);
-                
-                if (updatedTask) {
-                    sendResponse(200, updatedTask);
-                } else {
-                    sendResponse(404, { error: 'Task not found, update failed.' });
-                }
-            } catch (error) {
-                sendResponse(400, { error: 'Invalid JSON payload format.' });
+            const updatedTask = taskStore.update(id, req.body);
+            
+            if (updatedTask) {
+                sendResponse(200, updatedTask);
+            } else {
+                sendResponse(404, { error: 'Task not found, update failed.' });
             }
         }
 
