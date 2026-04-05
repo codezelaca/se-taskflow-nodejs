@@ -1,4 +1,5 @@
 const crypto = require('crypto'); // Built-in Node.js module for unique IDs
+const PriorityQueue = require('./PriorityQueue');
 
 // ==========================================
 // TaskStore - In-Memory Data Store (Class)
@@ -24,6 +25,7 @@ class TaskStore {
         //    - Maps conveniently have a built-in .size property.
         
         this.tasks = new Map();
+        this.queue = new PriorityQueue(); // O(log N) Task Queue prioritizing important tasks
     }
 
     // create(task): Adds a new task to the store.
@@ -36,12 +38,16 @@ class TaskStore {
             title: data.title || 'Untitled Task',
             description: data.description || '',
             status: data.status || 'pending', // could be 'pending', 'in-progress', 'completed'
+            priority: data.priority !== undefined && data.priority !== null ? Number(data.priority) : 1, // Default Low (1), higher = critical
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
 
         // O(1) Constant time insertion
         this.tasks.set(id, task);
+        
+        // O(log N) Priority Queue insertion
+        this.queue.enqueue(task);
         
         return task;
     }
@@ -73,17 +79,43 @@ class TaskStore {
             id, // We force the 'id' so the client cannot accidentally overwrite it
             updatedAt: new Date().toISOString()
         };
+
+        // Ensure priority is properly cast as a number if updated
+        if (updatedTask.priority !== undefined && updatedTask.priority !== null) {
+            updatedTask.priority = Number(updatedTask.priority);
+        }
         
         // Re-set the updated reference in the Map
         this.tasks.set(id, updatedTask);
+        
+        // Re-balance the Queue (since object reference and priority might have changed)
+        this.queue.remove(id);
+        this.queue.enqueue(updatedTask);
+
         return updatedTask;
     }
 
     // delete(id): Removes a task from the store. 
     delete(id) {
         // Map.delete() is an O(1) operation.
-        // Returns true if an element existed and was removed, or false if it did not exist.
-        return this.tasks.delete(id);
+        const existed = this.tasks.delete(id);
+        
+        if (existed) {
+            // Also remove from Priority Queue O(N) finding + O(log N) removal
+            this.queue.remove(id);
+        }
+        
+        return existed;
+    }
+
+    // getNextTask(): Pops and returns the highest priority task
+    getNextTask() {
+        const task = this.queue.dequeue();
+        if (task) {
+            // Remove it from the Map since it's dequeued
+            this.tasks.delete(task.id);
+        }
+        return task;
     }
 }
 

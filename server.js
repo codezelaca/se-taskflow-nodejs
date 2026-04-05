@@ -45,10 +45,16 @@ const server = http.createServer(async (req, res) => {
         const id = url.split('/')[2]; 
 
         // ----------------------------------------------------
-        // Handle GET /tasks (All) or /tasks/:id (Single)
+        // Handle GET /tasks (All) or /tasks/:id (Single, peek, queue)
         // ----------------------------------------------------
         if (method === 'GET') {
-            if (id) {
+            if (id === 'queue') {
+                // Returns the raw Max-Heap array
+                sendResponse(200, taskStore.queue.heap);
+            } else if (id === 'peek') {
+                // Returns the highest priority task without deleting it
+                sendResponse(200, taskStore.queue.peek() || { message: "Queue is empty" });
+            } else if (id) {
                 const task = taskStore.getById(id);
                 if (task) {
                     sendResponse(200, task);
