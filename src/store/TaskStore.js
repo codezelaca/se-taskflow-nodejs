@@ -1,5 +1,6 @@
 const crypto = require('crypto'); // Built-in Node.js module for unique IDs
 const PriorityQueue = require('./PriorityQueue');
+const DependencyList = require('./DependencyList');
 
 // ==========================================
 // TaskStore - In-Memory Data Store (Class)
@@ -33,12 +34,19 @@ class TaskStore {
         // We use crypto.randomUUID() for a universal unique identifier to prevent collisions
         const id = crypto.randomUUID(); 
         
+        // Initialize Linked List for task dependencies
+        const taskDependencies = new DependencyList();
+        if (Array.isArray(data.dependencies)) {
+            data.dependencies.forEach(depId => taskDependencies.append(depId));
+        }
+
         const task = {
             id,
             title: data.title || 'Untitled Task',
             description: data.description || '',
             status: data.status || 'pending', // could be 'pending', 'in-progress', 'completed'
             priority: data.priority !== undefined && data.priority !== null ? Number(data.priority) : 1, // Default Low (1), higher = critical
+            dependencies: taskDependencies,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
@@ -72,6 +80,15 @@ class TaskStore {
 
         const existingTask = this.tasks.get(id);
         
+        // SAFEGUARD: Intercept dependency list to ensure the Linked List object isn't overwritten
+        if (changes.dependencies && Array.isArray(changes.dependencies)) {
+            existingTask.dependencies.clear();
+            changes.dependencies.forEach(depId => existingTask.dependencies.append(depId));
+            
+            // Delete it from the 'changes' object so the spread operator below perfectly skips over it
+            delete changes.dependencies;
+        }
+
         // Spread operator to merge the old task data and and new changes together
         const updatedTask = {
             ...existingTask,
@@ -103,6 +120,12 @@ class TaskStore {
         if (existed) {
             // Also remove from Priority Queue O(N) finding + O(log N) removal
             this.queue.remove(id);
+            
+            // O(N) Cascade Execution: Sweep through all tasks to remove this deleted ID
+            // from their internal dependency linked lists to prevent ghost links.
+            for (const task of this.tasks.values()) {
+                task.dependencies.remove(id);
+            }
         }
         
         return existed;
