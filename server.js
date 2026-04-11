@@ -15,6 +15,7 @@ const taskStore = require("./src/store/TaskStore");
 const AuthHandler = require("./src/middleware/AuthHandler");
 const PermissionHandler = require("./src/middleware/PermissionHandler");
 const ValidationHandler = require("./src/middleware/ValidationHandler");
+const WorkerPool = require("./src/services/WorkerPool");
 
 // Import Logging and Error Handling Utilities
 const logger = require("./src/utils/logger");
@@ -27,6 +28,13 @@ middlewareChain
   .setNext(new ValidationHandler());
 
 const PORT = 3000;
+const DEFAULT_CPU_ITERATIONS = 120000000;
+
+const workerPool = new WorkerPool({
+  poolSize: Number(process.env.WORKER_POOL_SIZE) || undefined,
+  maxQueueSize: Number(process.env.WORKER_QUEUE_LIMIT) || 100,
+  jobTimeoutMs: Number(process.env.WORKER_JOB_TIMEOUT_MS) || 30000,
+});
 
 // ==========================================
 // Global Request Context & Response Helpers
@@ -34,6 +42,30 @@ const PORT = 3000;
 
 // Generate unique requestId for request tracing
 const generateRequestId = () => crypto.randomUUID();
+
+const toPositiveIterations = (rawValue, fallback = DEFAULT_CPU_ITERATIONS) => {
+  const parsedValue = Number(rawValue);
+  if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
+    return fallback;
+  }
+
+  return Math.floor(parsedValue);
+};
+
+const runBlockingCpuDemo = (iterations) => {
+  const startedAt = Date.now();
+  let accumulator = 0;
+
+  // This intentionally blocks the main thread for demonstration.
+  for (let i = 0; i < iterations; i += 1) {
+    accumulator += Math.sqrt((i % 1000) + 1) * Math.sin(i % 360);
+  }
+
+  return {
+    result: Number(accumulator.toFixed(4)),
+    durationMs: Date.now() - startedAt,
+  };
+};
 
 // Helper function to extract JSON from an incoming stream (the request)
 // This deals with asynchronous data chunks more elegantly.
@@ -79,6 +111,8 @@ const server = http.createServer(async (req, res) => {
     };
 
     const { method, url } = req;
+    const parsedUrl = new URL(url, "http://localhost");
+    const pathname = parsedUrl.pathname;
 
     // Parse incoming JSON body for mutating requests globally
     if (method === "POST" || method === "PUT") {
@@ -107,7 +141,7 @@ const server = http.createServer(async (req, res) => {
     // ==========================================
 
     // Demo 1: Intentional Server Error
-    if (url === "/demo/error/internal") {
+    if (pathname === "/demo/error/internal") {
       if (method !== "GET") {
         const { statusCode, response } = errorHandler.methodNotAllowedError(
           requestId,
@@ -121,7 +155,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Demo 2: Validation Error
-    if (url === "/demo/error/validation") {
+    if (pathname === "/demo/error/validation") {
       if (method !== "POST") {
         const { statusCode, response } = errorHandler.methodNotAllowedError(
           requestId,
@@ -141,7 +175,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Demo 3: Unauthorized Error
-    if (url === "/demo/error/unauthorized") {
+    if (pathname === "/demo/error/unauthorized") {
       if (method !== "GET") {
         const { statusCode, response } = errorHandler.methodNotAllowedError(
           requestId,
@@ -157,7 +191,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Demo 4: Forbidden Error
-    if (url === "/demo/error/forbidden") {
+    if (pathname === "/demo/error/forbidden") {
       if (method !== "GET") {
         const { statusCode, response } = errorHandler.methodNotAllowedError(
           requestId,
@@ -175,7 +209,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Demo 5: Not Found Error
-    if (url === "/demo/error/notfound") {
+    if (pathname === "/demo/error/notfound") {
       if (method !== "GET") {
         const { statusCode, response } = errorHandler.methodNotAllowedError(
           requestId,
@@ -193,7 +227,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Demo 6: Missing Field Error
-    if (url === "/demo/error/missingfield") {
+    if (pathname === "/demo/error/missingfield") {
       if (method !== "POST") {
         const { statusCode, response } = errorHandler.methodNotAllowedError(
           requestId,
@@ -211,7 +245,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     // Demo 7: Health check with request tracking
-    if (url === "/health") {
+    if (pathname === "/health") {
       if (method !== "GET") {
         const { statusCode, response } = errorHandler.methodNotAllowedError(
           requestId,
@@ -230,11 +264,196 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ==========================================
+    // CPU DEMOS: EVENT LOOP BLOCKING VS WORKERS
+    // ==========================================
+
+    if (pathname === "/demo/cpu/ping") {
+      if (method !== "GET") {
+        const { statusCode, response } = errorHandler.methodNotAllowedError(
+          requestId,
+          method,
+          pathname,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      return sendResponse(200, {
+        message: "pong",
+        requestId,
+        timestamp: new Date().toISOString(),
+      });
+    }
+
+    if (pathname === "/demo/cpu/blocking") {
+      if (method !== "GET") {
+        const { statusCode, response } = errorHandler.methodNotAllowedError(
+          requestId,
+          method,
+          pathname,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      const iterations = toPositiveIterations(
+        parsedUrl.searchParams.get("iterations"),
+      );
+
+      logger.info("Running blocking CPU demo on main thread", {
+        requestId,
+        iterations,
+        mode: "blocking-main-thread",
+      });
+
+      const output = runBlockingCpuDemo(iterations);
+
+      return sendResponse(200, {
+        mode: "blocking-main-thread",
+        requestId,
+        iterations,
+        ...output,
+      });
+    }
+
+    if (pathname === "/demo/cpu/worker/run") {
+      if (method !== "GET") {
+        const { statusCode, response } = errorHandler.methodNotAllowedError(
+          requestId,
+          method,
+          pathname,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      const iterations = toPositiveIterations(
+        parsedUrl.searchParams.get("iterations"),
+      );
+
+      logger.info("Running CPU demo on worker thread", {
+        requestId,
+        iterations,
+        mode: "worker-thread-await",
+      });
+
+      let jobId;
+      let completionPromise;
+
+      try {
+        ({ jobId, completionPromise } = workerPool.submitCpuJob(iterations));
+      } catch (submitError) {
+        const isQueueError = submitError.message.includes("queue is full");
+        const statusCode = isQueueError ? 503 : 400;
+        const response = errorHandler.createErrorResponse(
+          isQueueError
+            ? errorHandler.ErrorCodes.SERVICE_UNAVAILABLE
+            : errorHandler.ErrorCodes.BAD_REQUEST,
+          submitError.message,
+          requestId,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      const output = await completionPromise;
+
+      return sendResponse(200, {
+        mode: "worker-thread-await",
+        requestId,
+        jobId,
+        ...output,
+      });
+    }
+
+    if (pathname === "/demo/cpu/worker/start") {
+      if (method !== "GET") {
+        const { statusCode, response } = errorHandler.methodNotAllowedError(
+          requestId,
+          method,
+          pathname,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      const iterations = toPositiveIterations(
+        parsedUrl.searchParams.get("iterations"),
+      );
+      let jobId;
+      try {
+        ({ jobId } = workerPool.submitCpuJob(iterations));
+      } catch (submitError) {
+        const isQueueError = submitError.message.includes("queue is full");
+        const statusCode = isQueueError ? 503 : 400;
+        const response = errorHandler.createErrorResponse(
+          isQueueError
+            ? errorHandler.ErrorCodes.SERVICE_UNAVAILABLE
+            : errorHandler.ErrorCodes.BAD_REQUEST,
+          submitError.message,
+          requestId,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      logger.info("Queued CPU worker job", {
+        requestId,
+        jobId,
+        iterations,
+      });
+
+      return sendResponse(202, {
+        message: "Worker job accepted",
+        requestId,
+        jobId,
+        statusPath: `/demo/cpu/worker/jobs/${jobId}`,
+      });
+    }
+
+    if (pathname.startsWith("/demo/cpu/worker/jobs/")) {
+      if (method !== "GET") {
+        const { statusCode, response } = errorHandler.methodNotAllowedError(
+          requestId,
+          method,
+          pathname,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      const jobId = pathname.split("/").pop();
+      const job = workerPool.getJob(jobId);
+      if (!job) {
+        const { statusCode, response } = errorHandler.notFoundError(
+          requestId,
+          "Worker job",
+          jobId,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      return sendResponse(200, {
+        requestId,
+        ...job,
+      });
+    }
+
+    if (pathname === "/demo/cpu/worker/stats") {
+      if (method !== "GET") {
+        const { statusCode, response } = errorHandler.methodNotAllowedError(
+          requestId,
+          method,
+          pathname,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      return sendResponse(200, {
+        requestId,
+        ...workerPool.getStats(),
+      });
+    }
+
+    // ==========================================
     // TASK MANAGEMENT ENDPOINTS
     // ==========================================
 
     // We'll add rudimentary routing based on the start of the URL.
-    if (url === "/tasks" || url.startsWith("/tasks/")) {
+    if (pathname === "/tasks" || pathname.startsWith("/tasks/")) {
       // ==========================================
       // MIDDLEWARE CHAIN EXECUTION
       // ==========================================
@@ -244,7 +463,7 @@ const server = http.createServer(async (req, res) => {
       }
 
       // Extract an ID if it exists in the URL (e.g., /tasks/fa21-b2c3 -> "fa21-b2c3")
-      const id = url.split("/")[2];
+      const id = pathname.split("/")[2];
 
       // ----------------------------------------------------
       // Handle GET /tasks (All) or /tasks/:id (Single, peek, queue)
@@ -419,11 +638,14 @@ const server = http.createServer(async (req, res) => {
         method,
         url,
       });
-      const { statusCode, response } = errorHandler.createErrorResponse(
+      const statusCode = errorHandler.getStatusCode(
+        errorHandler.ErrorCodes.NOT_FOUND,
+      );
+      const response = errorHandler.createErrorResponse(
         errorHandler.ErrorCodes.NOT_FOUND,
         "Endpoint not found",
         requestId,
-        { url, method },
+        { url: pathname, method },
       );
       return sendResponse(statusCode, response);
     }
@@ -463,9 +685,6 @@ const server = http.createServer(async (req, res) => {
 
 // ==========================================
 // Server Startup
-
-// ==========================================
-// Server Startup
 // ==========================================
 
 server.listen(PORT, () => {
@@ -480,7 +699,8 @@ server.listen(PORT, () => {
 // Graceful shutdown on process termination
 process.on("SIGINT", () => {
   logger.info("Shutdown signal received (SIGINT)", {});
-  server.close(() => {
+  server.close(async () => {
+    await workerPool.shutdown();
     logger.info("Server closed cleanly", {});
     process.exit(0);
   });
@@ -488,7 +708,8 @@ process.on("SIGINT", () => {
 
 process.on("SIGTERM", () => {
   logger.info("Shutdown signal received (SIGTERM)", {});
-  server.close(() => {
+  server.close(async () => {
+    await workerPool.shutdown();
     logger.info("Server closed cleanly", {});
     process.exit(0);
   });
