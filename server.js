@@ -4,6 +4,8 @@
 
 const http = require("http");
 const crypto = require("crypto");
+const { Readable } = require("stream");
+const { pipeline } = require("stream/promises");
 
 // Load simple .env parser logic
 require("./src/config/env").loadEnv();
@@ -29,6 +31,8 @@ middlewareChain
 
 const PORT = 3000;
 const DEFAULT_CPU_ITERATIONS = 120000000;
+const DEFAULT_STREAM_DEMO_COUNT = 50000;
+const MAX_STREAM_DEMO_COUNT = 300000;
 
 const workerPool = new WorkerPool({
   poolSize: Number(process.env.WORKER_POOL_SIZE) || undefined,
@@ -50,6 +54,141 @@ const toPositiveIterations = (rawValue, fallback = DEFAULT_CPU_ITERATIONS) => {
   }
 
   return Math.floor(parsedValue);
+};
+
+const toPositiveBoundedCount = (
+  rawValue,
+  fallback = DEFAULT_STREAM_DEMO_COUNT,
+  max = MAX_STREAM_DEMO_COUNT,
+) => {
+  const parsedValue = Number(rawValue);
+  if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
+    return fallback;
+  }
+
+  return Math.min(Math.floor(parsedValue), max);
+};
+
+const toSerializableTask = (task) => ({
+  ...task,
+  dependencies:
+    task.dependencies && typeof task.dependencies.toArray === "function"
+      ? task.dependencies.toArray()
+      : Array.isArray(task.dependencies)
+        ? task.dependencies
+        : [],
+});
+
+const escapeCsvCell = (value) => {
+  const stringified = String(value ?? "");
+  const escaped = stringified.replace(/"/g, '""');
+  return `"${escaped}"`;
+};
+
+const createTaskCsvReadable = (taskIterable) =>
+  Readable.from(
+    (async function* generateCsv() {
+      yield "id,title,description,status,priority,dependencies,createdAt,updatedAt\n";
+
+      for (const task of taskIterable) {
+        const normalized = toSerializableTask(task);
+        const row = [
+          normalized.id,
+          normalized.title,
+          normalized.description,
+          normalized.status,
+          normalized.priority,
+          JSON.stringify(normalized.dependencies),
+          normalized.createdAt,
+          normalized.updatedAt,
+        ]
+          .map(escapeCsvCell)
+          .join(",");
+
+        yield `${row}\n`;
+      }
+    })(),
+  );
+
+const createTaskNdjsonReadable = (taskIterable) =>
+  Readable.from(
+    (async function* generateNdjson() {
+      for (const task of taskIterable) {
+        yield `${JSON.stringify(toSerializableTask(task))}\n`;
+      }
+    })(),
+  );
+
+const createSyntheticTaskIterable = (count) => ({
+  *[Symbol.iterator]() {
+    const baseTime = Date.now();
+    for (let i = 1; i <= count; i += 1) {
+      const timestamp = new Date(baseTime - i * 1000).toISOString();
+      yield {
+        id: `demo-task-${i}`,
+        title: `Synthetic Task ${i}`,
+        description: `Generated row ${i} for stream performance demo`,
+        status:
+          i % 3 === 0 ? "completed" : i % 2 === 0 ? "in-progress" : "pending",
+        priority: (i % 5) + 1,
+        dependencies: i % 10 === 0 ? [`demo-task-${Math.max(1, i - 1)}`] : [],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+    }
+  },
+});
+
+const streamToResponse = async ({
+  req,
+  res,
+  requestId,
+  startTime,
+  pathname,
+  contentType,
+  contentDisposition,
+  source,
+}) => {
+  const streamState = { aborted: false };
+
+  const markAborted = () => {
+    streamState.aborted = true;
+    source.destroy();
+  };
+
+  req.on("aborted", markAborted);
+  res.on("close", markAborted);
+
+  try {
+    const headers = {
+      "Content-Type": contentType,
+      "Cache-Control": "no-store",
+      "X-Request-Id": requestId,
+    };
+
+    if (contentDisposition) {
+      headers["Content-Disposition"] = contentDisposition;
+    }
+
+    res.writeHead(200, headers);
+    await pipeline(source, res);
+
+    const responseTime = Date.now() - startTime;
+    logger.logResponse(req, 200, responseTime, requestId);
+  } catch (error) {
+    if (streamState.aborted) {
+      logger.warn("Client disconnected during stream", {
+        requestId,
+        pathname,
+      });
+      return;
+    }
+
+    throw error;
+  } finally {
+    req.off("aborted", markAborted);
+    res.off("close", markAborted);
+  }
 };
 
 const runBlockingCpuDemo = (iterations) => {
@@ -449,6 +588,73 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ==========================================
+    // STREAMING DEMOS: CSV & NDJSON
+    // ==========================================
+
+    if (pathname === "/demo/stream/csv") {
+      if (method !== "GET") {
+        const { statusCode, response } = errorHandler.methodNotAllowedError(
+          requestId,
+          method,
+          pathname,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      const count = toPositiveBoundedCount(parsedUrl.searchParams.get("count"));
+      const iterable = createSyntheticTaskIterable(count);
+      const source = createTaskCsvReadable(iterable);
+
+      logger.info("Starting synthetic CSV stream demo", {
+        requestId,
+        count,
+      });
+
+      await streamToResponse({
+        req,
+        res,
+        requestId,
+        startTime,
+        pathname,
+        contentType: "text/csv; charset=utf-8",
+        contentDisposition: `attachment; filename=demo-stream-${count}.csv`,
+        source,
+      });
+      return;
+    }
+
+    if (pathname === "/demo/stream/ndjson") {
+      if (method !== "GET") {
+        const { statusCode, response } = errorHandler.methodNotAllowedError(
+          requestId,
+          method,
+          pathname,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      const count = toPositiveBoundedCount(parsedUrl.searchParams.get("count"));
+      const iterable = createSyntheticTaskIterable(count);
+      const source = createTaskNdjsonReadable(iterable);
+
+      logger.info("Starting synthetic NDJSON stream demo", {
+        requestId,
+        count,
+      });
+
+      await streamToResponse({
+        req,
+        res,
+        requestId,
+        startTime,
+        pathname,
+        contentType: "application/x-ndjson; charset=utf-8",
+        source,
+      });
+      return;
+    }
+
+    // ==========================================
     // TASK MANAGEMENT ENDPOINTS
     // ==========================================
 
@@ -469,6 +675,47 @@ const server = http.createServer(async (req, res) => {
       // Handle GET /tasks (All) or /tasks/:id (Single, peek, queue)
       // ----------------------------------------------------
       if (method === "GET") {
+        if (id === "export.csv") {
+          logger.info("Starting tasks CSV export stream", {
+            requestId,
+            taskCount: taskStore.tasks.size,
+          });
+
+          const source = createTaskCsvReadable(taskStore.tasks.values());
+
+          await streamToResponse({
+            req,
+            res,
+            requestId,
+            startTime,
+            pathname,
+            contentType: "text/csv; charset=utf-8",
+            contentDisposition: "attachment; filename=tasks-export.csv",
+            source,
+          });
+          return;
+        }
+
+        if (id === "stream.ndjson") {
+          logger.info("Starting tasks NDJSON stream", {
+            requestId,
+            taskCount: taskStore.tasks.size,
+          });
+
+          const source = createTaskNdjsonReadable(taskStore.tasks.values());
+
+          await streamToResponse({
+            req,
+            res,
+            requestId,
+            startTime,
+            pathname,
+            contentType: "application/x-ndjson; charset=utf-8",
+            source,
+          });
+          return;
+        }
+
         if (id === "queue") {
           logger.logTaskOperation("QUEUE_FETCH", "all", "SUCCESS", requestId, {
             queueSize: taskStore.queue.heap.length,
