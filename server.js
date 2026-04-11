@@ -18,6 +18,8 @@ const AuthHandler = require("./src/middleware/AuthHandler");
 const PermissionHandler = require("./src/middleware/PermissionHandler");
 const ValidationHandler = require("./src/middleware/ValidationHandler");
 const WorkerPool = require("./src/services/WorkerPool");
+const MemoryManager = require("./src/services/MemoryManager");
+const WebSocketHub = require("./src/services/WebSocketHub");
 
 // Import Logging and Error Handling Utilities
 const logger = require("./src/utils/logger");
@@ -38,6 +40,18 @@ const workerPool = new WorkerPool({
   poolSize: Number(process.env.WORKER_POOL_SIZE) || undefined,
   maxQueueSize: Number(process.env.WORKER_QUEUE_LIMIT) || 100,
   jobTimeoutMs: Number(process.env.WORKER_JOB_TIMEOUT_MS) || 30000,
+});
+
+const memoryManager = new MemoryManager({
+  requestHistoryLimit: Number(process.env.MEMORY_REQUEST_HISTORY_LIMIT) || 500,
+  eventHistoryLimit: Number(process.env.MEMORY_EVENT_HISTORY_LIMIT) || 500,
+  safeCacheLimit: Number(process.env.MEMORY_SAFE_CACHE_LIMIT) || 100,
+  leakBatchLimit: Number(process.env.MEMORY_LEAK_BATCH_LIMIT) || 100,
+  cleanupIntervalMs: Number(process.env.MEMORY_CLEANUP_INTERVAL_MS) || 60000,
+});
+
+const webSocketHub = new WebSocketHub({
+  path: "/ws/tasks",
 });
 
 // ==========================================
@@ -175,6 +189,14 @@ const streamToResponse = async ({
 
     const responseTime = Date.now() - startTime;
     logger.logResponse(req, 200, responseTime, requestId);
+    memoryManager.recordRequest({
+      requestId,
+      method: req.method,
+      url: req.url,
+      pathname,
+      statusCode: 200,
+      responseTimeMs: responseTime,
+    });
   } catch (error) {
     if (streamState.aborted) {
       logger.warn("Client disconnected during stream", {
@@ -190,6 +212,13 @@ const streamToResponse = async ({
     res.off("close", markAborted);
   }
 };
+
+const getMemoryUsagePayload = (requestId, label, details = {}) => ({
+  requestId,
+  label,
+  timestamp: new Date().toISOString(),
+  ...memoryManager.createSnapshot(label, details),
+});
 
 const runBlockingCpuDemo = (iterations) => {
   const startedAt = Date.now();
@@ -247,6 +276,14 @@ const server = http.createServer(async (req, res) => {
       // Log response after sending
       const responseTime = Date.now() - startTime;
       logger.logResponse(req, statusCode, responseTime, requestId);
+      memoryManager.recordRequest({
+        requestId,
+        method,
+        url,
+        pathname,
+        statusCode,
+        responseTimeMs: responseTime,
+      });
     };
 
     const { method, url } = req;
@@ -588,6 +625,152 @@ const server = http.createServer(async (req, res) => {
     }
 
     // ==========================================
+    // MEMORY MANAGEMENT DEMOS
+    // ==========================================
+
+    if (pathname === "/demo/memory/usage") {
+      if (method !== "GET") {
+        const { statusCode, response } = errorHandler.methodNotAllowedError(
+          requestId,
+          method,
+          pathname,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      return sendResponse(
+        200,
+        getMemoryUsagePayload(requestId, "memory-usage"),
+      );
+    }
+
+    if (pathname === "/demo/memory/stats") {
+      if (method !== "GET") {
+        const { statusCode, response } = errorHandler.methodNotAllowedError(
+          requestId,
+          method,
+          pathname,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      return sendResponse(200, {
+        requestId,
+        ...memoryManager.getStats(),
+      });
+    }
+
+    if (pathname === "/demo/memory/leak") {
+      if (method !== "POST") {
+        const { statusCode, response } = errorHandler.methodNotAllowedError(
+          requestId,
+          method,
+          pathname,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      const count = toPositiveBoundedCount(
+        parsedUrl.searchParams.get("count"),
+        1000,
+        10000,
+      );
+      const sizeKb = toPositiveBoundedCount(
+        parsedUrl.searchParams.get("sizeKb"),
+        8,
+        128,
+      );
+      const stats = memoryManager.createLeakBatch(count, sizeKb);
+
+      logger.warn("Intentional memory leak batch created", {
+        requestId,
+        count,
+        sizeKb,
+      });
+
+      return sendResponse(201, {
+        requestId,
+        mode: "intentional-leak",
+        count,
+        sizeKb,
+        ...stats,
+      });
+    }
+
+    if (pathname === "/demo/memory/safe") {
+      if (method !== "POST") {
+        const { statusCode, response } = errorHandler.methodNotAllowedError(
+          requestId,
+          method,
+          pathname,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      const count = toPositiveBoundedCount(
+        parsedUrl.searchParams.get("count"),
+        1000,
+        10000,
+      );
+      const sizeKb = toPositiveBoundedCount(
+        parsedUrl.searchParams.get("sizeKb"),
+        8,
+        128,
+      );
+      const stats = memoryManager.createSafeBatch(count, sizeKb);
+
+      logger.info("Bounded memory batch created", {
+        requestId,
+        count,
+        sizeKb,
+      });
+
+      return sendResponse(201, {
+        requestId,
+        mode: "bounded-cache",
+        count,
+        sizeKb,
+        ...stats,
+      });
+    }
+
+    if (pathname === "/demo/memory/clear") {
+      if (method !== "POST") {
+        const { statusCode, response } = errorHandler.methodNotAllowedError(
+          requestId,
+          method,
+          pathname,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      const stats = memoryManager.clearLeakCache();
+      logger.info("Memory demo caches cleared", { requestId });
+
+      return sendResponse(200, {
+        requestId,
+        mode: "cleared",
+        ...stats,
+      });
+    }
+
+    if (pathname === "/demo/ws/stats") {
+      if (method !== "GET") {
+        const { statusCode, response } = errorHandler.methodNotAllowedError(
+          requestId,
+          method,
+          pathname,
+        );
+        return sendResponse(statusCode, response);
+      }
+
+      return sendResponse(200, {
+        requestId,
+        ...webSocketHub.getStats(),
+      });
+    }
+
+    // ==========================================
     // STREAMING DEMOS: CSV & NDJSON
     // ==========================================
 
@@ -772,6 +955,12 @@ const server = http.createServer(async (req, res) => {
           logger.logTaskOperation("CREATE", newTask.id, "SUCCESS", requestId, {
             title: req.body.title,
           });
+          memoryManager.recordEvent({
+            type: "task.created",
+            taskId: newTask.id,
+            requestId,
+          });
+          webSocketHub.broadcastTaskEvent("task.created", newTask, requestId);
           sendResponse(201, newTask);
         } catch (err) {
           logger.logError(err, requestId, {
@@ -797,6 +986,16 @@ const server = http.createServer(async (req, res) => {
 
           if (updatedTask) {
             logger.logTaskOperation("UPDATE", id, "SUCCESS", requestId);
+            memoryManager.recordEvent({
+              type: "task.updated",
+              taskId: id,
+              requestId,
+            });
+            webSocketHub.broadcastTaskEvent(
+              "task.updated",
+              updatedTask,
+              requestId,
+            );
             sendResponse(200, updatedTask);
           } else {
             logger.warn(`Task update failed - not found: ${id}`, {
@@ -830,6 +1029,12 @@ const server = http.createServer(async (req, res) => {
 
           if (success) {
             logger.logTaskOperation("DELETE", id, "SUCCESS", requestId);
+            memoryManager.recordEvent({
+              type: "task.deleted",
+              taskId: id,
+              requestId,
+            });
+            webSocketHub.broadcastTaskEvent("task.deleted", { id }, requestId);
             // 204 No Content is standard for successful deletions where no body is returned.
             res.writeHead(204);
             res.end();
@@ -930,6 +1135,26 @@ const server = http.createServer(async (req, res) => {
   }
 });
 
+server.on("upgrade", (req, socket, head) => {
+  try {
+    const parsedUrl = new URL(req.url, "http://localhost");
+    webSocketHub.handleUpgrade(
+      req,
+      socket,
+      head,
+      parsedUrl.pathname,
+      memoryManager,
+    );
+  } catch (error) {
+    logger.error("WebSocket upgrade failed", {
+      errorMessage: error.message,
+      requestUrl: req.url,
+    });
+    socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
+    socket.destroy();
+  }
+});
+
 // ==========================================
 // Server Startup
 // ==========================================
@@ -948,6 +1173,8 @@ process.on("SIGINT", () => {
   logger.info("Shutdown signal received (SIGINT)", {});
   server.close(async () => {
     await workerPool.shutdown();
+    webSocketHub.shutdown();
+    memoryManager.stopCleanupLoop();
     logger.info("Server closed cleanly", {});
     process.exit(0);
   });
@@ -957,6 +1184,8 @@ process.on("SIGTERM", () => {
   logger.info("Shutdown signal received (SIGTERM)", {});
   server.close(async () => {
     await workerPool.shutdown();
+    webSocketHub.shutdown();
+    memoryManager.stopCleanupLoop();
     logger.info("Server closed cleanly", {});
     process.exit(0);
   });

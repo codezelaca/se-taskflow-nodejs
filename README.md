@@ -17,13 +17,18 @@ The result is a learning-first codebase that teaches both implementation and rea
 
 ## Current Implementation Status
 
-The code currently includes Parts 1 through 5:
+The code now includes Parts 1 through 10:
 
 - [x] **Step 1:** Raw Node.js HTTP server with manual routing
 - [x] **Step 2:** In-memory task store using JavaScript Map (O(1) Hash Map) and Singleton export
 - [x] **Step 3:** Priority Queue (Max-Heap) for O(log N) prioritized scheduling
 - [x] **Step 4:** Linked-List Task Dependency Chains with O(N) automated garbage collection (sweep)
 - [x] **Step 5:** OOP Middleware Chain of Responsibility (Authentication, Roles, Data Validation)
+- [x] **Step 6:** Global error handling with structured logging and request correlation
+- [x] **Step 7:** Memory leak detection, bounded caches, and memory observability
+- [x] **Step 8:** Worker Thread CPU offloading with a reusable worker pool
+- [x] **Step 9:** Streaming CSV / NDJSON exports with backpressure-safe pipelines
+- [x] **Step 10:** WebSocket live updates with heartbeats and task broadcast
 
 Planned parts are documented in the roadmap below and expanded in the learner guides.
 
@@ -31,20 +36,26 @@ Planned parts are documented in the roadmap below and expanded in the learner gu
 
 - Runtime: Node.js (No Babel, No TypeScript)
 - Current external npm packages: **none** (zero-dependency design)
-- Planned single exception: ws (introduced in final WebSocket step)
+- WebSocket support is implemented natively with the Node.js `upgrade` path and manual frame handling
 
 Everything else is built natively.
 
 ## Repository Structure
 
-- `server.js`: HTTP server, route handling, JSON parsing, middleware execution
+- `server.js`: HTTP server, route handling, JSON parsing, middleware execution, streaming, memory demos, and WebSocket upgrade handling
 - `benchmarks.js`: Big O demonstration (Array.find vs Map.get)
+- `worker-thread-benchmark.js`: Worker Thread benchmark for blocking vs parallel CPU work
+- `websocket-demo-client.js`: Terminal WebSocket client for live update demos
 - `src/store/TaskStore.js`: Singleton in-memory state engine
 - `src/store/PriorityQueue.js`: Max-Heap Queue data structure for ordering Tasks by priority
 - `src/store/DependencyList.js`: Singly Linked List data structure for Task prerequisite linking
+- `src/services/MemoryManager.js`: Bounded memory tracking, leak demo batches, and cleanup
+- `src/services/WorkerPool.js`: Managed Worker Thread pool for CPU-heavy jobs
+- `src/services/WebSocketHub.js`: Native WebSocket broadcast and heartbeat manager
 - `src/middleware/`: Chain of Responsibility implementation for Auth, Permissions, and Validations
 - `src/config/env.js`: Zero dependency `.env` parser
 - `learner/README.md`: Learning path and deep-dive documentation index
+- `FULL_DEMO_RUNBOOK.md`: End-to-end terminal demo instructions
 
 ## Quick Start
 
@@ -118,6 +129,46 @@ Updates an existing task by merging provided fields. Validates the payload and o
 
 Deletes a task and performs an O(N) sweep across all other tasks to cleanly remove its ID from their linked list dependencies to prevent ghost links! **Requires Admin Token**.
 
+### GET /tasks/export.csv
+
+Streams all tasks as CSV using backpressure-safe streaming.
+
+### GET /tasks/stream.ndjson
+
+Streams all tasks as NDJSON for incremental consumption.
+
+### GET /demo/cpu/ping
+
+Lightweight endpoint for latency checks before and after heavy CPU work.
+
+### GET /demo/cpu/blocking?iterations=...
+
+Runs CPU work on the main thread so you can demonstrate event loop blocking.
+
+### GET /demo/cpu/worker/run?iterations=...
+
+Runs the same CPU work in a Worker Thread and waits for completion.
+
+### GET /demo/cpu/worker/start?iterations=...
+
+Queues a Worker Thread job and returns a job ID for polling.
+
+### GET /demo/memory/usage
+
+Returns heap, rss, external, and array buffer memory usage.
+
+### POST /demo/memory/leak?count=...&sizeKb=...
+
+Creates an intentional leak batch for demonstration.
+
+### POST /demo/memory/safe?count=...&sizeKb=...
+
+Creates a bounded cache batch that gets trimmed automatically.
+
+### GET /demo/ws/stats
+
+Returns WebSocket hub statistics.
+
 ## End-to-End API Walkthrough (Copy/Paste)
 
 ### Create a Task (Admin Action)
@@ -146,7 +197,7 @@ curl -i -X POST http://localhost:3000/tasks \
 curl -i -H "Authorization: Bearer secret-user-123" http://localhost:3000/tasks
 ```
 
-### Update Task 
+### Update Task
 
 ```bash
 curl -i -X PUT http://localhost:3000/tasks/TASK_A_ID \
@@ -200,18 +251,18 @@ Each task currently contains:
 
 Taskflow’s intended progression covers:
 
-1. Raw HTTP API in Node.js without frameworks *(Done!)*
-2. In-memory task store with Hash Map and complexity benchmark *(Done!)*
-3. Priority queue for prioritized scheduling *(Done!)*
-4. Linked-list dependency chains and recursive dependency resolution *(Done!)*
-5. Middleware chain (authentication, authorization, validation) *(Done!)*
-6. Global error handling and structured logging
-7. Intentional memory leak demonstration and remediation
-8. Worker Thread report generation for CPU-heavy processing
-9. Streaming CSV export via Node streams
-10. WebSocket live updates using ws
+1. Raw HTTP API in Node.js without frameworks _(Done!)_
+2. In-memory task store with Hash Map and complexity benchmark _(Done!)_
+3. Priority queue for prioritized scheduling _(Done!)_
+4. Linked-list dependency chains and recursive dependency resolution _(Done!)_
+5. Middleware chain (authentication, authorization, validation) _(Done!)_
+6. Global error handling and structured logging _(Done!)_
+7. Intentional memory leak demonstration and remediation _(Done!)_
+8. Worker Thread report generation for CPU-heavy processing _(Done!)_
+9. Streaming CSV export via Node streams _(Done!)_
+10. WebSocket live updates using native Node.js upgrade handling _(Done!)_
 
-This repository currently has **Steps 1 through 5** completely implemented natively!
+This repository currently has **Steps 1 through 10** completely implemented natively!
 
 ## Concepts Covered in This Repository
 
@@ -225,10 +276,13 @@ Detailed guides are available in `learner/README.md`.
 ## Troubleshooting
 
 ### Port 3000 already in use
+
 Run server on a free port by changing PORT in `server.js`.
 
 ### Missing or Invalid Tokens
+
 Since Step 5 was introduced, modifying commands explicitly require an `ADMIN_TOKEN` placed inside the `Authorization: Bearer <token>` header as seen in the `.env` file.
 
 ### Data disappears after restart
+
 Expected behavior. This is currently an in-memory repository designed to teach data structures without database overhead!
