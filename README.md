@@ -43,9 +43,12 @@ Everything else is built natively.
 ## Repository Structure
 
 - `server.js`: HTTP server, route handling, JSON parsing, middleware execution, streaming, memory demos, and WebSocket upgrade handling
-- `benchmarks.js`: Big O demonstration (Array.find vs Map.get)
-- `worker-thread-benchmark.js`: Worker Thread benchmark for blocking vs parallel CPU work
-- `websocket-demo-client.js`: Terminal WebSocket client for live update demos
+- `scripts/full-demo.sh`: Unified end-to-end demo script covering all major concepts
+- `scripts/demo-live-events.sh`: Emits create/update/delete events for live WebSocket observation
+- `scripts/map-vs-array-benchmark.js`: Big O demonstration (Array.find vs Map.get)
+- `scripts/worker-benchmark.js`: Worker Thread benchmark for blocking vs parallel CPU work
+- `scripts/websocket-client.js`: Terminal WebSocket client for live update demos
+- `docs/full-demo.md`: Full demo instructions and integrated endpoint map
 - `src/store/TaskStore.js`: Singleton in-memory state engine
 - `src/store/PriorityQueue.js`: Max-Heap Queue data structure for ordering Tasks by priority
 - `src/store/DependencyList.js`: Singly Linked List data structure for Task prerequisite linking
@@ -83,10 +86,24 @@ Expected startup output:
 - `TaskFlow server is running on http://localhost:3000`
 - `Listening for requests... (Press Ctrl+C to stop)`
 
-### 4) Run the Complexity Benchmark
+### 4) Run Integrated Demos
+
+Full integrated demo:
 
 ```bash
-node benchmarks.js
+bash scripts/full-demo.sh
+```
+
+Data-structure benchmark:
+
+```bash
+node scripts/map-vs-array-benchmark.js
+```
+
+Worker benchmark:
+
+```bash
+node scripts/worker-benchmark.js
 ```
 
 You should observe significantly faster Map lookup timing compared to Array.find for large collections.
@@ -311,7 +328,7 @@ This repository currently has **Steps 1 through 10** completely implemented nati
 - Event Loop internals (Timers, Poll, Check phases)
 - Call Stack and libuv responsibilities
 
-Detailed guides are available in `learner/README.md`.
+Detailed guides are available in `learner/README.md` and `docs/full-demo.md`.
 
 ## Troubleshooting
 

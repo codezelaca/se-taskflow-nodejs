@@ -1,12 +1,3 @@
-// ==========================================
-// TaskFlow WebSocket Demo Client
-// ==========================================
-// Run with:
-//   node websocket-demo-client.js
-//
-// Optional args:
-//   node websocket-demo-client.js ws://localhost:3000/ws/tasks
-
 const net = require("net");
 const crypto = require("crypto");
 const { URL } = require("url");
@@ -23,12 +14,9 @@ const OPCODES = {
 const targetUrl = new URL(process.argv[2] || DEFAULT_URL);
 const port =
   Number(targetUrl.port) || (targetUrl.protocol === "wss:" ? 443 : 80);
-const isSecure = targetUrl.protocol === "wss:";
 
-if (isSecure) {
-  console.error(
-    "This demo client currently supports ws:// only. Use ws://localhost:3000/ws/tasks.",
-  );
+if (targetUrl.protocol === "wss:") {
+  console.error("This demo client supports ws:// only.");
   process.exit(1);
 }
 
@@ -44,7 +32,6 @@ const encodeClientFrame = (payload, opcode = OPCODES.TEXT) => {
   const mask = createMaskingKey();
   const length = data.length;
   let header;
-  let payloadLengthFieldSize = 0;
 
   if (length < 126) {
     header = Buffer.alloc(2);
@@ -53,12 +40,10 @@ const encodeClientFrame = (payload, opcode = OPCODES.TEXT) => {
     header = Buffer.alloc(4);
     header[1] = 0x80 | 126;
     header.writeUInt16BE(length, 2);
-    payloadLengthFieldSize = 2;
   } else {
     header = Buffer.alloc(10);
     header[1] = 0x80 | 127;
     header.writeBigUInt64BE(BigInt(length), 2);
-    payloadLengthFieldSize = 8;
   }
 
   header[0] = 0x80 | opcode;
@@ -90,7 +75,7 @@ const decodeFrames = (buffer) => {
       if (offset + 10 > buffer.length) break;
       const lengthValue = buffer.readBigUInt64BE(offset + 2);
       if (lengthValue > BigInt(Number.MAX_SAFE_INTEGER)) {
-        throw new Error("WebSocket frame too large.");
+        throw new Error("Frame too large");
       }
       payloadLength = Number(lengthValue);
       headerLength = 10;
@@ -103,24 +88,49 @@ const decodeFrames = (buffer) => {
       offset + headerLength,
       offset + frameLength,
     );
-
     frames.push({ opcode, payload });
     offset += frameLength;
   }
 
-  return {
-    frames,
-    remainder: buffer.subarray(offset),
-  };
+  return { frames, remainder: buffer.subarray(offset) };
 };
 
-const clientKey = crypto.randomBytes(16).toString("base64");
+const key = crypto.randomBytes(16).toString("base64");
 const socket = net.createConnection({ host: targetUrl.hostname, port });
+
 let handshakeComplete = false;
 let buffer = Buffer.alloc(0);
 
 const send = (payload, opcode = OPCODES.TEXT) => {
   socket.write(encodeClientFrame(payload, opcode));
+};
+
+const handleFrames = () => {
+  const decoded = decodeFrames(buffer);
+  buffer = decoded.remainder;
+
+  for (const frame of decoded.frames) {
+    if (frame.opcode === OPCODES.TEXT) {
+      const message = frame.payload.toString("utf8");
+      try {
+        console.log(JSON.stringify(JSON.parse(message), null, 2));
+      } catch {
+        console.log(message);
+      }
+      continue;
+    }
+
+    if (frame.opcode === OPCODES.PING) {
+      send(frame.payload, OPCODES.PONG);
+      continue;
+    }
+
+    if (frame.opcode === OPCODES.CLOSE) {
+      console.log("Server closed connection.");
+      socket.end();
+      process.exit(0);
+    }
+  }
 };
 
 socket.on("connect", () => {
@@ -129,37 +139,31 @@ socket.on("connect", () => {
     `Host: ${targetUrl.hostname}:${port}`,
     "Upgrade: websocket",
     "Connection: Upgrade",
-    `Sec-WebSocket-Key: ${clientKey}`,
+    `Sec-WebSocket-Key: ${key}`,
     "Sec-WebSocket-Version: 13",
     "\r\n",
   ].join("\r\n");
 
   socket.write(request);
-  console.log(`Connecting to ${targetUrl.href}...`);
+  console.log(`Connecting to ${targetUrl.href}`);
 });
 
 socket.on("data", (chunk) => {
   if (!handshakeComplete) {
-    const response = chunk.toString("utf8");
-    const headerEnd = response.indexOf("\r\n\r\n");
+    const asText = chunk.toString("utf8");
+    const headerEnd = asText.indexOf("\r\n\r\n");
+    if (headerEnd === -1) return;
 
-    if (headerEnd === -1) {
-      return;
-    }
-
-    const headerText = response.slice(0, headerEnd);
-    if (!headerText.includes("101 Switching Protocols")) {
-      console.error("Handshake failed:");
-      console.error(headerText);
+    const headers = asText.slice(0, headerEnd);
+    if (!headers.includes("101 Switching Protocols")) {
+      console.error("Handshake failed:\n" + headers);
       socket.end();
       return;
     }
 
     handshakeComplete = true;
     buffer = Buffer.from(chunk.subarray(headerEnd + 4));
-
-    console.log("WebSocket connection established.");
-    console.log("Subscribed to tasks room and waiting for broadcasts...");
+    console.log("Connected and subscribing to tasks room...");
     send({ type: "subscribe", rooms: ["tasks"] });
 
     if (buffer.length > 0) {
@@ -171,39 +175,6 @@ socket.on("data", (chunk) => {
   buffer = Buffer.concat([buffer, chunk]);
   handleFrames();
 });
-
-const handleFrames = () => {
-  const decoded = decodeFrames(buffer);
-  buffer = decoded.remainder;
-
-  for (const frame of decoded.frames) {
-    if (frame.opcode === OPCODES.TEXT) {
-      const message = frame.payload.toString("utf8");
-      try {
-        const parsed = JSON.parse(message);
-        console.log(JSON.stringify(parsed, null, 2));
-      } catch (error) {
-        console.log(message);
-      }
-      continue;
-    }
-
-    if (frame.opcode === OPCODES.PING) {
-      send(frame.payload, OPCODES.PONG);
-      continue;
-    }
-
-    if (frame.opcode === OPCODES.PONG) {
-      continue;
-    }
-
-    if (frame.opcode === OPCODES.CLOSE) {
-      console.log("Server closed the WebSocket connection.");
-      socket.end();
-      process.exit(0);
-    }
-  }
-};
 
 socket.on("error", (error) => {
   console.error("WebSocket client error:", error.message);
@@ -217,7 +188,7 @@ socket.on("close", () => {
 process.on("SIGINT", () => {
   try {
     send(Buffer.alloc(0), OPCODES.CLOSE);
-  } catch (error) {
+  } catch {
     // ignore
   }
   socket.end();

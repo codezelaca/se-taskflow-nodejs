@@ -950,6 +950,57 @@ const server = http.createServer(async (req, res) => {
 
       // Integrated report routes powered by worker threads.
       if (pathSegments[1] === "reports") {
+        if (pathSegments[2] === "blocking" && method === "GET") {
+          const iterations = toPositiveIterations(
+            parsedUrl.searchParams.get("iterations"),
+          );
+
+          const output = runBlockingCpuDemo(iterations);
+          return sendResponse(200, {
+            requestId,
+            mode: "main-thread-blocking",
+            iterations,
+            ...output,
+          });
+        }
+
+        if (pathSegments[2] === "worker-run" && method === "GET") {
+          const heavyIterations = toPositiveIterations(
+            parsedUrl.searchParams.get("iterations"),
+          );
+
+          let job;
+          try {
+            job = taskReportPool.submitJob(
+              {
+                tasks: taskStore.getAll().map(toSerializableTask),
+                heavyIterations,
+              },
+              { type: "task-report" },
+            );
+          } catch (submitError) {
+            const statusCode = submitError.message.includes("queue is full")
+              ? 503
+              : 400;
+            const response = errorHandler.createErrorResponse(
+              statusCode === 503
+                ? errorHandler.ErrorCodes.SERVICE_UNAVAILABLE
+                : errorHandler.ErrorCodes.BAD_REQUEST,
+              submitError.message,
+              requestId,
+            );
+            return sendResponse(statusCode, response);
+          }
+
+          const output = await job.completionPromise;
+          return sendResponse(200, {
+            requestId,
+            mode: "worker-thread-report",
+            jobId: job.jobId,
+            output,
+          });
+        }
+
         if (pathSegments[2] === "stats" && method === "GET") {
           return sendResponse(200, {
             requestId,
