@@ -4,6 +4,7 @@
 
 const http = require("http");
 const crypto = require("crypto");
+const path = require("path");
 const { Readable } = require("stream");
 const { pipeline } = require("stream/promises");
 
@@ -40,6 +41,18 @@ const workerPool = new WorkerPool({
   poolSize: Number(process.env.WORKER_POOL_SIZE) || undefined,
   maxQueueSize: Number(process.env.WORKER_QUEUE_LIMIT) || 100,
   jobTimeoutMs: Number(process.env.WORKER_JOB_TIMEOUT_MS) || 30000,
+});
+
+const taskReportPool = new WorkerPool({
+  poolSize: Number(process.env.REPORT_POOL_SIZE) || 2,
+  maxQueueSize: Number(process.env.REPORT_QUEUE_LIMIT) || 50,
+  jobTimeoutMs: Number(process.env.REPORT_JOB_TIMEOUT_MS) || 60000,
+  workerScriptPath: path.join(
+    __dirname,
+    "src",
+    "workers",
+    "taskReportWorker.js",
+  ),
 });
 
 const memoryManager = new MemoryManager({
@@ -853,11 +866,172 @@ const server = http.createServer(async (req, res) => {
 
       // Extract an ID if it exists in the URL (e.g., /tasks/fa21-b2c3 -> "fa21-b2c3")
       const id = pathname.split("/")[2];
+      const pathSegments = pathname.split("/").filter(Boolean);
+
+      // Integrated task-system endpoints (memory, websocket, workers)
+      if (pathSegments[1] === "system") {
+        if (method !== "GET") {
+          const { statusCode, response } = errorHandler.methodNotAllowedError(
+            requestId,
+            method,
+            pathname,
+          );
+          return sendResponse(statusCode, response);
+        }
+
+        if (pathSegments[2] === "memory") {
+          return sendResponse(200, {
+            requestId,
+            ...memoryManager.getStats(),
+          });
+        }
+
+        if (pathSegments[2] === "ws") {
+          return sendResponse(200, {
+            requestId,
+            ...webSocketHub.getStats(),
+          });
+        }
+      }
+
+      // Integrated memory controls for task-board operations.
+      if (pathSegments[1] === "memory") {
+        if (pathSegments[2] === "clear" && method === "POST") {
+          const stats = memoryManager.clearLeakCache();
+          return sendResponse(200, {
+            requestId,
+            mode: "cleared",
+            ...stats,
+          });
+        }
+
+        if (method !== "POST") {
+          const { statusCode, response } = errorHandler.methodNotAllowedError(
+            requestId,
+            method,
+            pathname,
+          );
+          return sendResponse(statusCode, response);
+        }
+
+        const count = toPositiveBoundedCount(
+          parsedUrl.searchParams.get("count"),
+          1000,
+          10000,
+        );
+        const sizeKb = toPositiveBoundedCount(
+          parsedUrl.searchParams.get("sizeKb"),
+          8,
+          128,
+        );
+
+        if (pathSegments[2] === "leak") {
+          const stats = memoryManager.createLeakBatch(count, sizeKb);
+          return sendResponse(201, {
+            requestId,
+            mode: "intentional-leak",
+            count,
+            sizeKb,
+            ...stats,
+          });
+        }
+
+        if (pathSegments[2] === "safe") {
+          const stats = memoryManager.createSafeBatch(count, sizeKb);
+          return sendResponse(201, {
+            requestId,
+            mode: "bounded-cache",
+            count,
+            sizeKb,
+            ...stats,
+          });
+        }
+      }
+
+      // Integrated report routes powered by worker threads.
+      if (pathSegments[1] === "reports") {
+        if (pathSegments[2] === "stats" && method === "GET") {
+          return sendResponse(200, {
+            requestId,
+            ...taskReportPool.getStats(),
+          });
+        }
+
+        if (pathSegments[2] === "start" && method === "POST") {
+          const heavyIterations = toPositiveBoundedCount(
+            parsedUrl.searchParams.get("heavyIterations"),
+            0,
+            DEFAULT_CPU_ITERATIONS,
+          );
+
+          let job;
+          try {
+            job = taskReportPool.submitJob(
+              {
+                tasks: taskStore.getAll().map(toSerializableTask),
+                heavyIterations,
+              },
+              { type: "task-report" },
+            );
+          } catch (submitError) {
+            const statusCode = submitError.message.includes("queue is full")
+              ? 503
+              : 400;
+            const response = errorHandler.createErrorResponse(
+              statusCode === 503
+                ? errorHandler.ErrorCodes.SERVICE_UNAVAILABLE
+                : errorHandler.ErrorCodes.BAD_REQUEST,
+              submitError.message,
+              requestId,
+            );
+            return sendResponse(statusCode, response);
+          }
+
+          return sendResponse(202, {
+            requestId,
+            message: "Task report job accepted",
+            jobId: job.jobId,
+            statusPath: `/tasks/reports/${job.jobId}`,
+          });
+        }
+
+        if (method === "GET" && pathSegments[2]) {
+          const reportJob = taskReportPool.getJob(pathSegments[2]);
+          if (!reportJob) {
+            const { statusCode, response } = errorHandler.notFoundError(
+              requestId,
+              "Task report job",
+              pathSegments[2],
+            );
+            return sendResponse(statusCode, response);
+          }
+
+          return sendResponse(200, {
+            requestId,
+            ...reportJob,
+          });
+        }
+
+        const { statusCode, response } = errorHandler.methodNotAllowedError(
+          requestId,
+          method,
+          pathname,
+        );
+        return sendResponse(statusCode, response);
+      }
 
       // ----------------------------------------------------
       // Handle GET /tasks (All) or /tasks/:id (Single, peek, queue)
       // ----------------------------------------------------
       if (method === "GET") {
+        if (id === "next") {
+          const nextTask = taskStore.queue.peek();
+          return sendResponse(
+            200,
+            nextTask || { message: "No tasks in queue" },
+          );
+        }
+
         if (id === "export.csv") {
           logger.info("Starting tasks CSV export stream", {
             requestId,
@@ -1173,6 +1347,7 @@ process.on("SIGINT", () => {
   logger.info("Shutdown signal received (SIGINT)", {});
   server.close(async () => {
     await workerPool.shutdown();
+    await taskReportPool.shutdown();
     webSocketHub.shutdown();
     memoryManager.stopCleanupLoop();
     logger.info("Server closed cleanly", {});
@@ -1184,6 +1359,7 @@ process.on("SIGTERM", () => {
   logger.info("Shutdown signal received (SIGTERM)", {});
   server.close(async () => {
     await workerPool.shutdown();
+    await taskReportPool.shutdown();
     webSocketHub.shutdown();
     memoryManager.stopCleanupLoop();
     logger.info("Server closed cleanly", {});

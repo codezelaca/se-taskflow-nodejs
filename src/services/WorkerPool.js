@@ -57,7 +57,7 @@ class WorkerPool {
     if (type === "job_completed") {
       job.status = "completed";
       job.finishedAt = new Date().toISOString();
-      job.output = {
+      job.output = message.output || {
         result: message.result,
         durationMs: message.durationMs,
         iterations: message.iterations,
@@ -159,12 +159,13 @@ class WorkerPool {
 
       idleWorker.worker.postMessage({
         jobId: nextJobId,
-        iterations: job.input.iterations,
+        type: job.type,
+        input: job.input,
       });
     }
   }
 
-  submitCpuJob(iterations) {
+  submitJob(input, options = {}) {
     if (this.isShuttingDown) {
       throw new Error("Worker pool is shutting down.");
     }
@@ -173,10 +174,9 @@ class WorkerPool {
       throw new Error("Worker queue is full. Try again later.");
     }
 
-    const normalizedIterations = Number(iterations);
-    if (!Number.isFinite(normalizedIterations) || normalizedIterations <= 0) {
-      throw new Error("Iterations must be a positive number.");
-    }
+    const validatedInput = options.validateInput
+      ? options.validateInput(input)
+      : input;
 
     const jobId = crypto.randomUUID();
 
@@ -193,7 +193,8 @@ class WorkerPool {
       createdAt: new Date().toISOString(),
       startedAt: null,
       finishedAt: null,
-      input: { iterations: normalizedIterations },
+      type: options.type || "generic",
+      input: validatedInput,
       output: null,
       error: null,
       timeoutHandle: null,
@@ -208,6 +209,26 @@ class WorkerPool {
       jobId,
       completionPromise,
     };
+  }
+
+  submitCpuJob(iterations) {
+    return this.submitJob(
+      { iterations },
+      {
+        type: "cpu",
+        validateInput: (input) => {
+          const normalizedIterations = Number(input.iterations);
+          if (
+            !Number.isFinite(normalizedIterations) ||
+            normalizedIterations <= 0
+          ) {
+            throw new Error("Iterations must be a positive number.");
+          }
+
+          return { iterations: normalizedIterations };
+        },
+      },
+    );
   }
 
   getJob(jobId) {

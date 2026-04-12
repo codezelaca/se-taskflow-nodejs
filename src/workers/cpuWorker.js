@@ -16,10 +16,10 @@ const runCpuIntensiveComputation = (iterations) => {
 };
 
 parentPort.on("message", (payload) => {
-  const { jobId, iterations } = payload;
+  const { jobId, input } = payload;
 
   try {
-    const normalizedIterations = Number(iterations);
+    const normalizedIterations = Number(input?.iterations);
     if (!Number.isFinite(normalizedIterations) || normalizedIterations <= 0) {
       throw new Error("Iterations must be a positive number.");
     }
@@ -30,10 +30,12 @@ parentPort.on("message", (payload) => {
     parentPort.postMessage({
       type: "job_completed",
       jobId,
-      threadId,
-      durationMs,
-      iterations: normalizedIterations,
-      result,
+      output: {
+        threadId,
+        durationMs,
+        iterations: normalizedIterations,
+        result,
+      },
     });
   } catch (error) {
     parentPort.postMessage({

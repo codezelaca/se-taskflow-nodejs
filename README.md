@@ -137,6 +137,46 @@ Streams all tasks as CSV using backpressure-safe streaming.
 
 Streams all tasks as NDJSON for incremental consumption.
 
+### GET /tasks/next
+
+Returns the next highest-priority task candidate from the queue without dequeuing it.
+
+### POST /tasks/reports/start?heavyIterations=...
+
+Starts a Worker Thread powered task analytics report job and returns a `jobId`.
+
+### GET /tasks/reports/:jobId
+
+Fetches report job status and output.
+
+### GET /tasks/reports/stats
+
+Returns report worker pool runtime statistics.
+
+### GET /tasks/system/memory
+
+Returns current bounded memory manager and process memory statistics.
+
+### POST /tasks/memory/leak?count=...&sizeKb=...
+
+Creates an intentional retained batch (for leak demonstration).
+
+### POST /tasks/memory/safe?count=...&sizeKb=...
+
+Creates a bounded cache batch that trims automatically.
+
+### POST /tasks/memory/clear
+
+Clears memory demo caches.
+
+### GET /tasks/system/ws
+
+Returns WebSocket hub statistics.
+
+### WS /ws/tasks
+
+Real-time task event stream (`task.created`, `task.updated`, `task.deleted`).
+
 ### GET /demo/cpu/ping
 
 Lightweight endpoint for latency checks before and after heavy CPU work.
