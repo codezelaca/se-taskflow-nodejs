@@ -1,3 +1,297 @@
+# Taskflow: Learn Backend Engineering From Scratch
+
+Welcome! Taskflow teaches backend engineering fundamentals using **only Node.js—no frameworks, no magic**.
+
+You'll build a real task queue system step-by-step, learning core concepts as you go.
+
+## Why Learn This Way?
+
+Frameworks hide how things work. This project shows you **exactly** what happens:
+
+- How HTTP requests are parsed
+- How data is stored and retrieved
+- How middleware chains work
+- How to handle errors and scale efficiently
+- How real-time updates work with WebSockets
+
+By the end, you'll understand backend systems deeply and be able to debug or build anything.
+
+## What You'll Build
+
+A real-time task management app with:
+
+- Task creation, updates, deletion
+- Priority-based scheduling
+- Dependency tracking between tasks
+- Parallel job processing with Worker Threads
+- Memory management and monitoring
+- Live updates via WebSockets
+- Data streaming (CSV/NDJSON export)
+
+## Quick Start (5 minutes)
+
+### 1. Install Node.js
+
+You need Node.js 18+. Download from [nodejs.org](https://nodejs.org).
+
+Check you have it:
+
+```bash
+node --version
+```
+
+### 2. Clone or Navigate to This Folder
+
+```bash
+cd se-taskflow-nodejs
+```
+
+### 3. Setup Environment
+
+```bash
+cp .env.example .env
+```
+
+This file stores your API tokens (used for testing authentication).
+
+### 4. Start the Server
+
+```bash
+node server.js
+```
+
+You should see:
+
+```
+Environment variables loaded natively.
+[timestamp] TaskFlow server started on http://localhost:3000
+Listening for requests...
+```
+
+### 5. Open Another Terminal and Try It
+
+Create a task:
+
+```bash
+curl -X POST http://localhost:3000/tasks \
+  -H "Authorization: Bearer secret-admin-123" \
+  -H "Content-Type: application/json" \
+  -d '{"title":"Learn backend","priority":9}'
+```
+
+List all tasks:
+
+```bash
+curl http://localhost:3000/tasks \
+  -H "Authorization: Bearer secret-user-123"
+```
+
+## 10-Step Learning Path
+
+Start at **Step 1** and progress sequentially. Each step builds on the previous one.
+
+| Step | Topic                                           | What You Learn                                          |
+| ---- | ----------------------------------------------- | ------------------------------------------------------- |
+| 1    | [Raw HTTP Server](learner/01-http-server.md)    | How Node's http module works, routing, request/response |
+| 2    | [In-Memory Storage](learner/02-task-store.md)   | Hash maps, O(1) lookups, the singleton pattern          |
+| 3    | [Priority Queues](learner/03-priority-queue.md) | Heaps, O(log N) operations, scheduling algorithms       |
+| 4    | [Dependency Chains](learner/04-dependencies.md) | Linked lists, O(N) traversal, recursive resolution      |
+| 5    | [Middleware Chains](learner/05-middleware.md)   | The Chain of Responsibility pattern, authentication     |
+| 6    | [Error Handling](learner/06-errors-logging.md)  | Structured error responses, request correlation         |
+| 7    | [Memory Management](learner/07-memory.md)       | Heap vs stack, garbage collection, memory leaks         |
+| 8    | [Worker Threads](learner/08-worker-threads.md)  | Parallelism, offloading CPU work, avoiding blocking     |
+| 9    | [Streaming Data](learner/09-streaming.md)       | Readable streams, backpressure, chunked responses       |
+| 10   | [WebSockets](learner/10-websockets.md)          | Real-time two-way communication, frame encoding         |
+
+**→ Start with [Step 1](learner/01-http-server.md)**
+
+## Run the Full Learning Demo
+
+After understanding the concepts, run everything together:
+
+```bash
+# Terminal 1: Start the server
+node server.js
+
+# Terminal 2 (optional): Watch live task events
+node scripts/websocket-client.js
+
+# Terminal 3: Run the full demo
+bash scripts/full-demo.sh
+```
+
+This script demonstrates all 10 concepts in action.
+
+## File Organization
+
+```
+server.js                     # The main HTTP server
+.env.example                  # Copy to .env before running
+
+learner/                      # 10 step-by-step guides
+├── 01-http-server.md        # Start here!
+├── 02-task-store.md
+├── ...
+└── 10-websockets.md
+
+src/                          # Implementation code
+├── store/                    # Data structures
+├── middleware/               # Request handlers
+├── services/                 # Worker pools, WebSockets, memory
+├── workers/                  # CPU-heavy background jobs
+└── utils/                    # Logging, errors
+
+scripts/                      # Demo and benchmark scripts
+├── full-demo.sh             # Run this after learning
+├── dependency-resolver-demo.sh
+├── websocket-client.js
+└── benchmarks/
+
+docs/                         # API reference and operation guides
+```
+
+## Key Concepts at a Glance
+
+**Data Structures:**
+
+- Map (hash table): O(1) lookups
+- Max-Heap: O(log N) priority ordering
+- Linked List: O(1) append, O(N) traversal
+
+**Patterns:**
+
+- Middleware Chain of Responsibility
+- Singleton (shared state)
+- Worker pools (task queues)
+
+**Operations:**
+
+- HTTP routing with manual parsing
+- WebSocket frame protocol
+- Request/response correlation
+- Memory bounded caches
+
+## Common Commands
+
+```bash
+# Start server
+node server.js
+
+# Run full demo (all 10 concepts at once)
+bash scripts/full-demo.sh
+
+# Benchmark: Map vs Array lookup speed
+node scripts/map-vs-array-benchmark.js
+
+# Benchmark: Main thread vs worker threads
+node scripts/worker-benchmark.js
+
+# Dependency resolver demo
+bash scripts/dependency-resolver-demo.sh
+
+# Live WebSocket client
+node scripts/websocket-client.js
+```
+
+## API Quick Reference
+
+All endpoints require authentication header:
+
+```bash
+-H "Authorization: Bearer secret-admin-123"   # Admin (can create/update/delete)
+-H "Authorization: Bearer secret-user-123"    # User (can only view)
+```
+
+**Tasks:**
+
+```bash
+POST /tasks                   # Create a task
+GET /tasks                    # List all tasks
+GET /tasks/:id                # Get one task
+PUT /tasks/:id                # Update a task
+DELETE /tasks/:id             # Delete a task
+GET /tasks/next               # Get highest priority task
+GET /tasks/resolve            # Resolve full dependency order
+GET /tasks/:id/resolve        # Resolve dependencies for one task
+```
+
+**Real-Time:**
+
+```bash
+WS /ws/tasks                  # Connect for live updates
+```
+
+**Monitoring:**
+
+```bash
+GET /tasks/system/memory      # Memory usage stats
+GET /tasks/system/ws          # WebSocket connection count
+GET /tasks/reports/stats      # Worker pool statistics
+```
+
+**Streaming:**
+
+```bash
+GET /tasks/export.csv         # Download tasks as CSV
+GET /tasks/stream.ndjson      # Stream tasks as NDJSON
+```
+
+For full API details, see [docs/api-reference.md](docs/api-reference.md).
+
+## Troubleshooting
+
+**Port already in use?**
+
+```bash
+# Kill the process using port 3000
+lsof -ti:3000 | xargs kill -9
+```
+
+**Getting 401 Unauthorized?**
+Add the auth header:
+
+```bash
+-H "Authorization: Bearer secret-admin-123"
+```
+
+**Server crashes on startup?**
+Make sure your `node --version` shows 18+:
+
+```bash
+node --version
+```
+
+## Next Steps
+
+1. **Read Step 1:** [Raw HTTP Server](learner/01-http-server.md)
+2. **Build it:** Follow the exercises in each guide
+3. **Run scripts:** Use the demo scripts to see it all working
+4. **Experiment:** Modify the code and see what breaks—that's learning!
+
+## Questions or Stuck?
+
+- Re-read the specific guide for that concept
+- Look at the working code in `src/`
+- Run a demo script to see the live behavior
+- Add `console.log()` statements to trace execution
+
+## Technology Stack
+
+- **Runtime:** Node.js (no TypeScript, no Babel)
+- **Database:** In-memory hash map (resets on restart)
+- **Real-time:** Native WebSocket protocol (no external library)
+- **External packages:** None (everything from Node.js stdlib)
+
+This is intentional—you'll see exactly what you're using and why.
+
+## License
+
+Open source, learn freely.
+
+---
+
+**Ready? → [Start with Step 1: Raw HTTP Server](learner/01-http-server.md)**
+
 # Taskflow
 
 Taskflow is a real-time, collaborative task queue system built to teach backend engineering from first principles.
