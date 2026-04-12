@@ -31,6 +31,15 @@ Basic recursive pattern:
 2. recurse into dependencies
 3. return resolved order
 
+Current implementation mapping:
+
+- Recursive DFS resolver in [../src/store/TaskStore.js](../src/store/TaskStore.js) via `resolveExecutionOrder(...)`
+- Full-graph endpoint: `GET /tasks/resolve`
+- Scoped endpoint: `GET /tasks/:id/resolve`
+- Cycle conflict response: HTTP 409 with cycle path details
+- Missing dependency response: HTTP 422 with missing node details
+- Demo script: `scripts/dependency-resolver-demo.sh`
+
 ## Safety Notes
 
 - guard against cycles (A -> B -> A)
@@ -46,5 +55,11 @@ Requirements:
 - detect cycles
 - return informative error on cycle
 - output topologically valid sequence
+
+You can now run this in the project:
+
+```bash
+bash scripts/dependency-resolver-demo.sh
+```
 
 This becomes a strong bridge from data structures to production reliability.

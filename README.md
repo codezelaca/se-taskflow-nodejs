@@ -47,6 +47,7 @@ Everything else is built natively.
 - `scripts/demo-live-events.sh`: Emits create/update/delete events for live WebSocket observation
 - `scripts/map-vs-array-benchmark.js`: Big O demonstration (Array.find vs Map.get)
 - `scripts/worker-benchmark.js`: Worker Thread benchmark for blocking vs parallel CPU work
+- `scripts/dependency-resolver-demo.sh`: Recursive dependency resolution and cycle detection demo
 - `scripts/websocket-client.js`: Terminal WebSocket client for live update demos
 - `docs/full-demo.md`: Full demo instructions and integrated endpoint map
 - `src/store/TaskStore.js`: Singleton in-memory state engine
@@ -58,7 +59,7 @@ Everything else is built natively.
 - `src/middleware/`: Chain of Responsibility implementation for Auth, Permissions, and Validations
 - `src/config/env.js`: Zero dependency `.env` parser
 - `learner/README.md`: Learning path and deep-dive documentation index
-- `FULL_DEMO_RUNBOOK.md`: End-to-end terminal demo instructions
+- `docs/full-demo.md`: End-to-end terminal demo instructions
 
 ## Quick Start
 
@@ -157,6 +158,14 @@ Streams all tasks as NDJSON for incremental consumption.
 ### GET /tasks/next
 
 Returns the next highest-priority task candidate from the queue without dequeuing it.
+
+### GET /tasks/resolve
+
+Resolves dependency-safe execution order for all tasks using recursive DFS/topological ordering.
+
+### GET /tasks/:id/resolve
+
+Resolves dependency-safe execution order for one task subtree. Returns 409 when a cycle is detected.
 
 ### POST /tasks/reports/start?heavyIterations=...
 
@@ -311,7 +320,7 @@ Taskflow’s intended progression covers:
 1. Raw HTTP API in Node.js without frameworks _(Done!)_
 2. In-memory task store with Hash Map and complexity benchmark _(Done!)_
 3. Priority queue for prioritized scheduling _(Done!)_
-4. Linked-list dependency chains and recursive dependency resolution _(Done!)_
+4. Linked-list dependency chains and recursive dependency resolution with cycle detection _(Done!)_
 5. Middleware chain (authentication, authorization, validation) _(Done!)_
 6. Global error handling and structured logging _(Done!)_
 7. Intentional memory leak demonstration and remediation _(Done!)_

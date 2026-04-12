@@ -24,7 +24,7 @@ Performance problems are often design problems. The right structure can remove e
 
 ## Existing Benchmark
 
-See [../benchmarks.js](../benchmarks.js).
+See [../scripts/map-vs-array-benchmark.js](../scripts/map-vs-array-benchmark.js).
 
 It compares:
 

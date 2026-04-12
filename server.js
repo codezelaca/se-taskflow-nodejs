@@ -1075,6 +1075,84 @@ const server = http.createServer(async (req, res) => {
       // Handle GET /tasks (All) or /tasks/:id (Single, peek, queue)
       // ----------------------------------------------------
       if (method === "GET") {
+        if (id === "resolve" && pathSegments.length === 2) {
+          try {
+            const resolution = taskStore.resolveExecutionOrder();
+            return sendResponse(200, {
+              requestId,
+              ...resolution,
+            });
+          } catch (resolveError) {
+            if (resolveError.code === "CYCLE_DETECTED") {
+              const response = errorHandler.createErrorResponse(
+                errorHandler.ErrorCodes.CONFLICT,
+                resolveError.message,
+                requestId,
+                { cyclePath: resolveError.cyclePath || [] },
+              );
+              return sendResponse(409, response);
+            }
+
+            if (resolveError.code === "MISSING_DEPENDENCY") {
+              const response = errorHandler.createErrorResponse(
+                errorHandler.ErrorCodes.VALIDATION_ERROR,
+                resolveError.message,
+                requestId,
+                {
+                  missingTaskId: resolveError.missingTaskId,
+                  requiredBy: resolveError.requiredBy,
+                },
+              );
+              return sendResponse(422, response);
+            }
+
+            throw resolveError;
+          }
+        }
+
+        if (pathSegments[2] === "resolve" && id) {
+          try {
+            const resolution = taskStore.resolveExecutionOrder(id);
+            return sendResponse(200, {
+              requestId,
+              ...resolution,
+            });
+          } catch (resolveError) {
+            if (resolveError.code === "TASK_NOT_FOUND") {
+              const { statusCode, response } = errorHandler.taskNotFoundError(
+                requestId,
+                resolveError.taskId,
+              );
+              return sendResponse(statusCode, response);
+            }
+
+            if (resolveError.code === "CYCLE_DETECTED") {
+              const response = errorHandler.createErrorResponse(
+                errorHandler.ErrorCodes.CONFLICT,
+                resolveError.message,
+                requestId,
+                { cyclePath: resolveError.cyclePath || [] },
+              );
+              return sendResponse(409, response);
+            }
+
+            if (resolveError.code === "MISSING_DEPENDENCY") {
+              const response = errorHandler.createErrorResponse(
+                errorHandler.ErrorCodes.VALIDATION_ERROR,
+                resolveError.message,
+                requestId,
+                {
+                  missingTaskId: resolveError.missingTaskId,
+                  requiredBy: resolveError.requiredBy,
+                },
+              );
+              return sendResponse(422, response);
+            }
+
+            throw resolveError;
+          }
+        }
+
         if (id === "next") {
           const nextTask = taskStore.queue.peek();
           return sendResponse(
