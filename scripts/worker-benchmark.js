@@ -3,6 +3,7 @@ const WorkerPool = require("../src/services/WorkerPool");
 const DEFAULT_ITERATIONS = 900_000_000;
 const DEFAULT_PARALLEL_JOBS = 4;
 
+// Parse positive integer args with safe fallback values.
 const parsePositiveInteger = (value, fallback) => {
   const parsedValue = Number(value);
   if (!Number.isFinite(parsedValue) || parsedValue <= 0) {
@@ -12,6 +13,7 @@ const parsePositiveInteger = (value, fallback) => {
   return Math.floor(parsedValue);
 };
 
+// Same CPU workload used by worker demo so comparison is fair.
 const runBlockingCpuWork = (iterations) => {
   const startedAt = Date.now();
   let accumulator = 0;
@@ -26,6 +28,7 @@ const runBlockingCpuWork = (iterations) => {
   };
 };
 
+// Baseline: run jobs one after another on main thread.
 const benchmarkSequentialMainThread = (iterations) => {
   const startedAt = Date.now();
   const firstRun = runBlockingCpuWork(iterations);
@@ -40,6 +43,7 @@ const benchmarkSequentialMainThread = (iterations) => {
   };
 };
 
+// Parallel mode: run jobs at the same time in worker threads.
 const benchmarkWorkerThreadParallel = async (iterations, parallelJobs) => {
   const pool = new WorkerPool({
     poolSize: Math.max(2, parallelJobs),

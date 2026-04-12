@@ -1,6 +1,7 @@
 const crypto = require("crypto");
 const logger = require("../utils/logger");
 
+// Magic GUID from the WebSocket RFC used during handshake.
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const HEARTBEAT_INTERVAL_MS = 30000;
 
@@ -21,6 +22,7 @@ const safeJsonParse = (value) => {
   }
 };
 
+// Convert text/binary payload into a valid WebSocket frame.
 const encodeFrame = (payload, opcode = OPCODES.TEXT) => {
   const data = Buffer.isBuffer(payload)
     ? payload
@@ -48,6 +50,7 @@ const encodeFrame = (payload, opcode = OPCODES.TEXT) => {
   return Buffer.concat([header, data]);
 };
 
+// Parse one or many WebSocket frames from a raw TCP chunk.
 const decodeFrames = (buffer) => {
   const frames = [];
   let offset = 0;
@@ -118,6 +121,7 @@ class WebSocketHub {
     this.clientCounter = 0;
     this.heartbeatTimer = null;
     this.startedAt = Date.now();
+    // Heartbeat keeps dead clients from lingering forever.
     this.startHeartbeat();
   }
 
@@ -129,6 +133,7 @@ class WebSocketHub {
   }
 
   handleUpgrade(req, socket, head, pathname, memoryManager) {
+    // Reject upgrades to unknown paths.
     if (pathname !== this.path) {
       socket.write("HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n");
       socket.destroy();
@@ -146,6 +151,7 @@ class WebSocketHub {
       !secWebSocketKey ||
       secWebSocketVersion !== "13"
     ) {
+      // Reject malformed WebSocket handshake requests.
       socket.write("HTTP/1.1 400 Bad Request\r\nConnection: close\r\n\r\n");
       socket.destroy();
       return false;
@@ -210,6 +216,7 @@ class WebSocketHub {
   }
 
   handleSocketData(clientState, chunk, memoryManager) {
+    // TCP chunks can split frames, so keep an internal remainder buffer.
     clientState.buffer = Buffer.concat([clientState.buffer, chunk]);
 
     let decoded;
@@ -226,6 +233,7 @@ class WebSocketHub {
       clientState.lastSeenAt = new Date().toISOString();
 
       if (frame.opcode === OPCODES.PONG) {
+        // PONG marks client as alive.
         clientState.isAlive = true;
         continue;
       }
@@ -237,6 +245,7 @@ class WebSocketHub {
       }
 
       if (frame.opcode === OPCODES.CLOSE) {
+        // Acknowledge close and cleanly remove client.
         this.sendControl(clientState, OPCODES.CLOSE, Buffer.alloc(0));
         this.removeClient(clientState, "client_close");
         return;
@@ -258,6 +267,7 @@ class WebSocketHub {
       }
 
       if (message.type === "subscribe") {
+        // Client can choose one or more rooms.
         const rooms = Array.isArray(message.rooms) ? message.rooms : [];
         clientState.rooms = new Set(rooms.length > 0 ? rooms : ["tasks"]);
         memoryManager?.recordEvent({
@@ -323,6 +333,7 @@ class WebSocketHub {
     let delivered = 0;
 
     for (const clientState of this.clients.values()) {
+      // Skip clients that are not subscribed to this room.
       if (!clientState.rooms.has(targetRoom)) {
         continue;
       }
@@ -366,6 +377,7 @@ class WebSocketHub {
     clientState.isAlive = false;
 
     try {
+      // Best effort socket cleanup.
       if (!clientState.socket.destroyed) {
         clientState.socket.end();
         clientState.socket.destroy();
@@ -390,6 +402,7 @@ class WebSocketHub {
     this.heartbeatTimer = setInterval(() => {
       for (const clientState of this.clients.values()) {
         if (!clientState.isAlive) {
+          // No PONG since last interval, consider client dead.
           this.removeClient(clientState, "heartbeat_timeout");
           continue;
         }
@@ -429,6 +442,7 @@ class WebSocketHub {
 
     for (const clientState of this.clients.values()) {
       try {
+        // Send CLOSE frame before destroying socket.
         this.sendControl(clientState, OPCODES.CLOSE, Buffer.alloc(0));
         clientState.socket.end();
         clientState.socket.destroy();

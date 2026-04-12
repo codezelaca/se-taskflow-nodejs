@@ -3,11 +3,13 @@ const SEARCH_TARGET = 99999;
 
 console.log(`Setting up data structures with ${ITEMS_COUNT} items...\n`);
 
+// Array stores items in sequence, so find() scans until it matches.
 const arrayData = [];
 for (let i = 0; i < ITEMS_COUNT; i++) {
   arrayData.push({ id: `task-${i}`, val: `Demo value-${i}` });
 }
 
+// Map stores key -> value entries for near O(1) direct lookup.
 const mapData = new Map();
 for (let i = 0; i < ITEMS_COUNT; i++) {
   mapData.set(`task-${i}`, { id: `task-${i}`, val: `Demo value-${i}` });

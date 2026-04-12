@@ -5,12 +5,13 @@ This project now has a single integrated demo path to learn all major backend co
 ## What this covers in one run
 
 1. Task CRUD and priority queue behavior
-2. WebSocket live updates on task lifecycle
-3. Worker-thread report generation (async + heavy mode)
-4. Blocking vs worker comparison
-5. Memory retained batch vs bounded batch comparison
-6. Streaming task exports (CSV + NDJSON)
-7. System observability endpoints (memory, worker stats, websocket stats)
+2. Recursive dependency resolution and cycle detection
+3. WebSocket live updates on task lifecycle
+4. Worker-thread report generation (async + heavy mode)
+5. Blocking vs worker comparison
+6. Memory retained batch vs bounded batch comparison
+7. Streaming task exports (CSV + NDJSON)
+8. System observability endpoints (memory, worker stats, websocket stats)
 
 ## Start server
 
@@ -37,6 +38,8 @@ bash scripts/full-demo.sh
 - `PUT /tasks/:id`
 - `DELETE /tasks/:id`
 - `GET /tasks/next`
+- `GET /tasks/resolve`
+- `GET /tasks/:id/resolve`
 - `GET /tasks/export.csv`
 - `GET /tasks/stream.ndjson`
 - `POST /tasks/reports/start?heavyIterations=...`
@@ -54,6 +57,7 @@ bash scripts/full-demo.sh
 ## Notes
 
 - The script uses default tokens from `.env.example`.
+- For a focused recursion-only walkthrough, run `bash scripts/dependency-resolver-demo.sh`.
 - You can override values:
 
 ```bash

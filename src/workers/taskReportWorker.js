@@ -1,5 +1,6 @@
 const { parentPort, threadId } = require("worker_threads");
 
+// Build a report from a task array in parallel worker context.
 const buildTaskReport = (tasks, heavyIterations = 0) => {
   const startedAt = Date.now();
 
@@ -20,6 +21,7 @@ const buildTaskReport = (tasks, heavyIterations = 0) => {
   let totalDependencies = 0;
 
   for (const task of tasks) {
+    // Count status buckets.
     const status = task.status || "other";
     if (Object.prototype.hasOwnProperty.call(byStatus, status)) {
       byStatus[status] += 1;
@@ -27,6 +29,7 @@ const buildTaskReport = (tasks, heavyIterations = 0) => {
       byStatus.other += 1;
     }
 
+    // Group priorities into simple learning-friendly buckets.
     const priorityValue = Number(task.priority || 0);
     if (priorityValue >= 8) {
       byPriority.high += 1;
@@ -36,6 +39,7 @@ const buildTaskReport = (tasks, heavyIterations = 0) => {
       byPriority.low += 1;
     }
 
+    // Track dependency-related backlog metrics.
     const deps = Array.isArray(task.dependencies) ? task.dependencies : [];
     totalDependencies += deps.length;
     if (deps.length > 0) {
@@ -75,6 +79,7 @@ parentPort.on("message", (payload) => {
 
     const report = buildTaskReport(tasks, heavyIterations);
 
+    // Send computed report back to the main thread.
     parentPort.postMessage({
       type: "job_completed",
       jobId,
@@ -84,6 +89,7 @@ parentPort.on("message", (payload) => {
       },
     });
   } catch (error) {
+    // Return worker-side failures in a structured format.
     parentPort.postMessage({
       type: "job_failed",
       jobId,

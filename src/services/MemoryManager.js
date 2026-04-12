@@ -3,6 +3,7 @@ const DEFAULT_CACHE_LIMIT = 100;
 const DEFAULT_LEAK_BATCH_LIMIT = 100;
 const DEFAULT_CLEANUP_INTERVAL_MS = 60000;
 
+// MemoryManager keeps debug data bounded so demos stay stable.
 class MemoryManager {
   constructor(options = {}) {
     this.requestHistoryLimit =
@@ -19,10 +20,12 @@ class MemoryManager {
     this.intentionalLeakCache = [];
     this.cleanupTimer = null;
 
+    // Start periodic cleanup immediately after initialization.
     this.startCleanupLoop();
   }
 
   trimToLimit(collection, limit) {
+    // Keep only the newest entries when limit is exceeded.
     if (collection.length > limit) {
       collection.splice(0, collection.length - limit);
     }
@@ -62,6 +65,7 @@ class MemoryManager {
   }
 
   addToLeakCache(payload) {
+    // Leak cache intentionally keeps much more data for learning demos.
     this.intentionalLeakCache.push({
       timestamp: new Date().toISOString(),
       payload,
@@ -70,6 +74,7 @@ class MemoryManager {
   }
 
   generateLargePayload(sizeKb) {
+    // Create a predictable string payload by size in kilobytes.
     const targetSize = Math.max(1, Number(sizeKb) || 1) * 1024;
     return "x".repeat(targetSize);
   }
@@ -109,6 +114,7 @@ class MemoryManager {
   }
 
   clearLeakCache() {
+    // Reset both caches to quickly recover memory during demos.
     this.intentionalLeakCache = [];
     this.safeCache = [];
     return this.getStats();
@@ -129,6 +135,7 @@ class MemoryManager {
       () => this.cleanup(),
       this.cleanupIntervalMs,
     );
+    // unref lets Node exit even if only this timer is active.
     this.cleanupTimer.unref();
   }
 

@@ -28,7 +28,7 @@ curl -s -H "Authorization: $USER_TOKEN" "$BASE_URL/tasks/system/memory" | jq .
 curl -s -H "Authorization: $USER_TOKEN" "$BASE_URL/tasks/system/ws" | jq .
 echo ""
 
-echo "[2/8] Create task board data"
+echo "[2/9] Create task board data"
 TASK_1=$(curl -s -X POST "$BASE_URL/tasks" \
   -H "Authorization: $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
@@ -44,7 +44,27 @@ echo "Created TASK_2=$TASK_2"
 curl -s -H "Authorization: $USER_TOKEN" "$BASE_URL/tasks/next" | jq .
 echo ""
 
-echo "[3/8] Trigger websocket-visible updates"
+echo "[3/9] Dependency resolution (recursive DFS + cycle detection)"
+curl -s -H "Authorization: $USER_TOKEN" "$BASE_URL/tasks/resolve" | jq .
+curl -s -H "Authorization: $USER_TOKEN" "$BASE_URL/tasks/$TASK_2/resolve" | jq .
+
+# Introduce a cycle temporarily: TASK_1 -> TASK_2 while TASK_2 -> TASK_1 already exists.
+curl -s -X PUT "$BASE_URL/tasks/$TASK_1" \
+  -H "Authorization: $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d "{\"dependencies\":[\"$TASK_2\"]}" >/dev/null
+
+echo "Cycle check response (expected 409):"
+curl -s -i -H "Authorization: $USER_TOKEN" "$BASE_URL/tasks/$TASK_2/resolve" | head -n 12
+
+# Restore clean state for the rest of the demo.
+curl -s -X PUT "$BASE_URL/tasks/$TASK_1" \
+  -H "Authorization: $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"dependencies":[]}' >/dev/null
+echo ""
+
+echo "[4/9] Trigger websocket-visible updates"
 curl -s -X PUT "$BASE_URL/tasks/$TASK_2" \
   -H "Authorization: $ADMIN_TOKEN" \
   -H "Content-Type: application/json" \
@@ -55,7 +75,7 @@ curl -s -X DELETE "$BASE_URL/tasks/$TASK_1" \
 echo "Updated TASK_2 and deleted TASK_1"
 echo ""
 
-echo "[4/8] Worker report (async job lifecycle)"
+echo "[5/9] Worker report (async job lifecycle)"
 REPORT_JOB_ID=$(curl -s -X POST "$BASE_URL/tasks/reports/start?heavyIterations=30000000" \
   -H "Authorization: $ADMIN_TOKEN" | jq -r '.jobId')
 
@@ -69,7 +89,7 @@ done
 curl -s -H "Authorization: $USER_TOKEN" "$BASE_URL/tasks/reports/$REPORT_JOB_ID" | jq .
 echo ""
 
-echo "[5/8] CPU comparison (main-thread vs worker-thread)"
+echo "[6/9] CPU comparison (main-thread vs worker-thread)"
 
 echo "Running blocking report endpoint in background..."
 curl -s "$BASE_URL/tasks/reports/blocking?iterations=$ITERATIONS" \
@@ -91,7 +111,7 @@ cat /tmp/taskflow_blocking.json | jq .
 cat /tmp/taskflow_worker.json | jq .
 echo ""
 
-echo "[6/8] Memory comparison (leak-like vs bounded cache)"
+echo "[7/9] Memory comparison (leak-like vs bounded cache)"
 MEM_BEFORE=$(curl -s -H "Authorization: $USER_TOKEN" "$BASE_URL/tasks/system/memory" | jq '.memory.heapUsed')
 
 curl -s -X POST "$BASE_URL/tasks/memory/leak?count=800&sizeKb=32" \
@@ -109,7 +129,7 @@ curl -s -X POST "$BASE_URL/tasks/memory/clear" \
   -H "Authorization: $ADMIN_TOKEN" | jq '.mode, .safeCacheSize, .intentionalLeakCacheSize'
 echo ""
 
-echo "[7/8] Streaming exports (real task board data)"
+echo "[8/9] Streaming exports (real task board data)"
 curl -s -H "Authorization: $USER_TOKEN" "$BASE_URL/tasks/export.csv" > /tmp/taskflow-export.csv
 curl -s -H "Authorization: $USER_TOKEN" "$BASE_URL/tasks/stream.ndjson" > /tmp/taskflow-export.ndjson
 
@@ -119,7 +139,7 @@ head -n 3 /tmp/taskflow-export.csv
 head -n 2 /tmp/taskflow-export.ndjson
 echo ""
 
-echo "[8/8] Final system snapshots"
+echo "[9/9] Final system snapshots"
 curl -s -H "Authorization: $USER_TOKEN" "$BASE_URL/tasks/system/memory" | jq .
 curl -s -H "Authorization: $USER_TOKEN" "$BASE_URL/tasks/reports/stats" | jq .
 curl -s -H "Authorization: $USER_TOKEN" "$BASE_URL/tasks/system/ws" | jq .

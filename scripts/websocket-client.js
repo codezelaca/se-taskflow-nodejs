@@ -15,6 +15,7 @@ const targetUrl = new URL(process.argv[2] || DEFAULT_URL);
 const port =
   Number(targetUrl.port) || (targetUrl.protocol === "wss:" ? 443 : 80);
 
+// Keep this script simple: only ws:// (non-TLS) for local demos.
 if (targetUrl.protocol === "wss:") {
   console.error("This demo client supports ws:// only.");
   process.exit(1);
@@ -22,6 +23,7 @@ if (targetUrl.protocol === "wss:") {
 
 const createMaskingKey = () => crypto.randomBytes(4);
 
+// Client frames must be masked per WebSocket protocol rules.
 const encodeClientFrame = (payload, opcode = OPCODES.TEXT) => {
   const data = Buffer.isBuffer(payload)
     ? payload
@@ -56,6 +58,7 @@ const encodeClientFrame = (payload, opcode = OPCODES.TEXT) => {
   return Buffer.concat([header, mask, masked]);
 };
 
+// Decode server frames from raw TCP stream bytes.
 const decodeFrames = (buffer) => {
   const frames = [];
   let offset = 0;
@@ -111,6 +114,7 @@ const handleFrames = () => {
 
   for (const frame of decoded.frames) {
     if (frame.opcode === OPCODES.TEXT) {
+      // Pretty print JSON messages so task events are easy to read.
       const message = frame.payload.toString("utf8");
       try {
         console.log(JSON.stringify(JSON.parse(message), null, 2));
@@ -121,6 +125,7 @@ const handleFrames = () => {
     }
 
     if (frame.opcode === OPCODES.PING) {
+      // Reply to server heartbeat pings.
       send(frame.payload, OPCODES.PONG);
       continue;
     }
@@ -134,6 +139,7 @@ const handleFrames = () => {
 };
 
 socket.on("connect", () => {
+  // Minimal manual WebSocket upgrade request.
   const request = [
     `GET ${targetUrl.pathname} HTTP/1.1`,
     `Host: ${targetUrl.hostname}:${port}`,

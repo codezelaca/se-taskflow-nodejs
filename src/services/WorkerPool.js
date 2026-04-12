@@ -3,10 +3,12 @@ const path = require("path");
 const crypto = require("crypto");
 const { Worker } = require("worker_threads");
 
+// WorkerPool keeps CPU-heavy jobs off the main event loop.
 class WorkerPool {
   constructor(options = {}) {
     const cpuCount = os.cpus().length;
 
+    // Reasonable defaults for local development and demos.
     this.poolSize = options.poolSize || Math.max(1, Math.min(cpuCount - 1, 4));
     this.maxQueueSize = options.maxQueueSize || 100;
     this.jobTimeoutMs = options.jobTimeoutMs || 30000;
@@ -19,12 +21,14 @@ class WorkerPool {
     this.jobs = new Map();
     this.isShuttingDown = false;
 
+    // Pre-spawn workers so the first request does not pay startup cost.
     for (let i = 0; i < this.poolSize; i += 1) {
       this._spawnWorker();
     }
   }
 
   _spawnWorker() {
+    // Each worker runs a separate JS file in parallel.
     const worker = new Worker(this.workerScriptPath);
     const workerState = {
       worker,
@@ -54,6 +58,7 @@ class WorkerPool {
 
     clearTimeout(job.timeoutHandle);
 
+    // Resolve or reject the promise based on worker result.
     if (type === "job_completed") {
       job.status = "completed";
       job.finishedAt = new Date().toISOString();
@@ -129,6 +134,7 @@ class WorkerPool {
       return;
     }
 
+    // Keep assigning queued jobs while idle workers exist.
     while (this.jobQueue.length > 0) {
       const idleWorker = this._getIdleWorker();
       if (!idleWorker) {
@@ -157,6 +163,7 @@ class WorkerPool {
         idleWorker.worker.terminate();
       }, this.jobTimeoutMs);
 
+      // Send job payload to worker thread.
       idleWorker.worker.postMessage({
         jobId: nextJobId,
         type: job.type,
@@ -174,6 +181,7 @@ class WorkerPool {
       throw new Error("Worker queue is full. Try again later.");
     }
 
+    // Optional input validation lets each job type enforce its own rules.
     const validatedInput = options.validateInput
       ? options.validateInput(input)
       : input;
@@ -212,6 +220,7 @@ class WorkerPool {
   }
 
   submitCpuJob(iterations) {
+    // Convenience API used by CPU benchmark/demo routes.
     return this.submitJob(
       { iterations },
       {
@@ -250,6 +259,7 @@ class WorkerPool {
   }
 
   getStats() {
+    // Snapshot-style metrics useful for dashboards and debugging.
     const values = Array.from(this.jobs.values());
 
     return {
@@ -267,6 +277,7 @@ class WorkerPool {
   }
 
   async shutdown() {
+    // Prevent new jobs, then terminate all worker threads.
     this.isShuttingDown = true;
 
     for (const workerState of this.workers) {

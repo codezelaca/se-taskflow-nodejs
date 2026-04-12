@@ -1,5 +1,6 @@
 const { parentPort, threadId } = require("worker_threads");
 
+// Runs inside a worker thread, not on the main event loop.
 const runCpuIntensiveComputation = (iterations) => {
   const startedAt = Date.now();
   let accumulator = 0;
@@ -16,6 +17,7 @@ const runCpuIntensiveComputation = (iterations) => {
 };
 
 parentPort.on("message", (payload) => {
+  // parentPort is the communication channel with the main thread.
   const { jobId, input } = payload;
 
   try {
@@ -27,6 +29,7 @@ parentPort.on("message", (payload) => {
     const { result, durationMs } =
       runCpuIntensiveComputation(normalizedIterations);
 
+    // Send successful result back to WorkerPool.
     parentPort.postMessage({
       type: "job_completed",
       jobId,
@@ -38,6 +41,7 @@ parentPort.on("message", (payload) => {
       },
     });
   } catch (error) {
+    // Send failure details so caller can handle it cleanly.
     parentPort.postMessage({
       type: "job_failed",
       jobId,

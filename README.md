@@ -95,6 +95,12 @@ Full integrated demo:
 bash scripts/full-demo.sh
 ```
 
+Dependency resolver focused demo:
+
+```bash
+bash scripts/dependency-resolver-demo.sh
+```
+
 Data-structure benchmark:
 
 ```bash
